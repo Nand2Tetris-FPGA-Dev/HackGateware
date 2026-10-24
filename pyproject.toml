@@ -9,3 +9,12 @@ skip = [
 	"*.gitignore",
 	"AUTHORS.md",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tools/hacktools/tests", "hw/sim/tests"]
+pythonpath = ["tools/hacktools/src", "hw/sim"]
+markers = [
+	"requires_iverilog: skip when iverilog is not on PATH",
+	"requires_yosys: skip when yosys is not on PATH",
+	"requires_env(*names): skip when any of these environment variables is unset",
+]
