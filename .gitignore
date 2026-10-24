@@ -21,6 +21,17 @@ dist/
 build/
 *.tsbuildinfo
 
+# Simulation and FPGA build output
+*.vvp
+*.vcd
+*.fst
+*.fs
+
+# Python (simulation test runner)
+__pycache__/
+.pytest_cache/
+.venv/
+
 # Environment Files
 .env
 .env.local

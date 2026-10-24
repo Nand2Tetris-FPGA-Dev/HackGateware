@@ -1,5 +1,10 @@
-# Handle line endings automatically for text files
-* text=auto
+# Store and check out every text file with LF, on every OS.
+# Matches .editorconfig and the mixed-line-ending pre-commit hook.
+* text=auto eol=lf
+
+# FPGA build outputs and memory images that must never be converted
+*.fs binary
+*.bin binary
 
 # Force LF for standard text and source files
 *.txt text eol=lf
