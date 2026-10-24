@@ -1,34 +1,56 @@
-# Template-Repository
+# HackGateware
 
-Template repository for Nand2Tetris FPGA development
+The nand2tetris Hack computer in Verilog, running on the
+[Sipeed Tang Nano 9K](https://wiki.sipeed.com/hardware/en/tang/Tang-Nano-9K/Nano-9K.html).
+It's built only with the open-source Gowin toolchain.
 
-## Prerequisites
+Students write Hack programs as usual and load them from the board's external
+SPI flash. The computer itself stays in the FPGA's internal flash, so they never
+have to rebuild or reflash it.
 
-Before running the setup scripts, ensure your system meets the following requirements:
+> **Status:** early development. Nothing here builds yet. The first milestone,
+> due 2026-12-01, is the Hack computer booting a program from flash and showing
+> the Hack screen over HDMI.
 
-- **Git:** Installed and configured
+## What it is
 
-## Quick Start
+- **CPU, ALU, and memory map:** exactly as in the book. That's 32K words of
+  program memory, RAM at 0–16383, the screen at 16384–24575, and the keyboard
+  at 24576.
+- **Program memory:** PSRAM, filled at power-on by a boot loader that copies a
+  CRC-checked program image from external flash. If PSRAM doesn't work with
+  the open toolchain, the fallback is to run programs straight from flash.
+- **Video:** HDMI at 640×480, 60 Hz. The 512×256 Hack screen is centered 1:1.
+- **Language:** plain Verilog-2005. The one exception is a vendored PSRAM
+  controller in SystemVerilog.
 
-1. **Clone the repository:**
+## Toolchain
 
-   ```bash
-   git clone <repository_url>
-   cd <repository_name>
-   ```
+All of these come in
+[OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build), pinned to the
+**2026-08-21** release:
 
-2. **Run the setup script:** Run the setup script for your operating system to install dependencies and register pre-commit Git hooks:
-   - **macOS / Linux / WSL:**
+- Yosys, nextpnr-himbaechel, and Apicula (`gowin_pack`), for synthesis,
+  place-and-route, and bitstream packing
+- openFPGALoader, for flashing the board
+- Icarus Verilog, for simulation
 
-     ```bash
-     ./setup.sh
-     ```
+The Gowin IDE isn't used.
 
-   - **Windows (PowerShell):**
+## Layout
 
-     ```powershell
-     ./setup.ps1
+```text
+hw/
+  rtl/      the computer: cpu/, mem/, progmem/, io/, video/, top/
+  sim/      testbenches, simulation models, and the tests that run them
+  boards/   pin constraints for each board (tangnano9k/)
+  spikes/   small test designs used to check board features
+```
 
-     # IF you get an error about running scripts
-     powershell -ExecutionPolicy Bypass -File setup.ps1
-     ```
+## Getting started
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, branches, and commit rules.
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).
