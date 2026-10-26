@@ -1,5 +1,6 @@
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -29,3 +30,67 @@ def iverilog(
         if r.returncode != 0:
             raise SimError(f"vvp failed (exit {r.returncode}):\n{r.stdout}\n{r.stderr}")
         return r.stdout
+
+
+HW = Path(__file__).resolve().parents[1]
+COMPUTER_SOURCES = [
+    HW / "sim/tb/tb_computer.v",
+    HW / "rtl/top/hack_computer.v",
+    HW / "rtl/progmem/progmem_sim.v",
+    HW / "rtl/cpu/hack_cpu.v",
+    HW / "rtl/cpu/hack_alu.v",
+    HW / "rtl/mem/hack_memory.v",
+    HW / "rtl/mem/ram16k.v",
+    HW / "rtl/mem/screen_mem.v",
+]
+
+
+@dataclass
+class SimResult:
+    trace: list[tuple[int, int, int]]
+    ram: list[int]
+    screen: list[int]
+
+
+def _read_words(path: Path) -> list[int]:
+    return [int(line, 16) for line in path.read_text().split()]
+
+
+def run_computer(
+    rom: list[int],
+    steps: int,
+    ram_init: dict[int, int] | None = None,
+    keyboard: list[tuple[int, int]] | None = None,
+    reset_at: int | None = None,
+    pm_latency: int = 1,
+    trace: bool = True,
+) -> SimResult:
+    """Run the RTL computer for `steps` instructions. keyboard takes at most one
+    (step, value) pair, applied before that step."""
+    if keyboard and len(keyboard) > 1:
+        raise ValueError("run_computer supports one keyboard change")
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        (work / "rom.hex").write_text("".join(f"{w:04x}\n" for w in rom))
+        plusargs = {"STEPS": str(steps), "ROM_WORDS": str(len(rom))}
+        if ram_init:
+            (work / "ram_init.hex").write_text(
+                "".join(f"@{a:x}\n{v:04x}\n" for a, v in sorted(ram_init.items()))
+            )
+            plusargs["RAMINIT"] = "1"
+        if keyboard:
+            plusargs["KBD_AT"], plusargs["KBD_VAL"] = (str(x) for x in keyboard[0])
+        if reset_at is not None:
+            plusargs["RESET_AT"] = str(reset_at)
+        if trace:
+            plusargs["TRACE"] = "1"
+        out = iverilog(COMPUTER_SOURCES, "tb_computer", plusargs=plusargs,
+                       defines={"PM_LATENCY": str(pm_latency)}, cwd=work)
+        if "DONE" not in out:
+            raise SimError(out)
+        lines = (work / "trace.txt").read_text().splitlines() if trace else []
+        return SimResult(
+            trace=[tuple(int(f, 16) for f in line.split()) for line in lines],
+            ram=_read_words(work / "ram.txt"),
+            screen=_read_words(work / "screen.txt"),
+        )
