@@ -4,6 +4,7 @@ write-changes = true
 check-hidden = true
 quiet-level = 3
 builtin = ["clear", "rare", "en-GB_to_en-US"]
+ignore-words-list = "dout"
 skip = [
 	".mailmap",
 	"*.gitignore",
