@@ -1,5 +1,7 @@
 // 16K x 16 RAM. Reads are registered so it maps to block RAM: dout shows the
 // word at addr from the previous clock edge.
+// Written to match yosys's Gowin BSRAM patterns (techlibs/gowin/brams.txt in
+// https://github.com/YosysHQ/yosys). BSRAM: Gowin UG285, BSRAM & SSRAM User Guide.
 module ram16k (
     input  wire        clk,
     input  wire        we,

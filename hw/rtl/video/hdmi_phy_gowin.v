@@ -1,5 +1,7 @@
 // Serializes three TMDS channels and the clock lane (10:1, LSB first) onto
 // differential outputs.
+// Based on https://github.com/YosysHQ/apicula/blob/master/examples/DVI/dvi-example.v
+// OSER10 and ELVDS_OBUF: Gowin UG289, Gowin Programmable IO (GPIO) User Guide
 module hdmi_phy_gowin (
     input  wire       clk_pix,
     input  wire       clk_ser,

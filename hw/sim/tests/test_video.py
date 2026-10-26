@@ -13,7 +13,7 @@ CONTROL_TOKENS = {0: 0b1101010100, 1: 0b0010101011, 2: 0b0101010100, 3: 0b101010
 
 
 def tmds_ref(d: int, de: int, c: int, disparity: int) -> tuple[int, int]:
-    """DVI 1.0 TMDS encoder (spec figure 3-5). Returns (10-bit symbol, new disparity)."""
+    """DVI 1.0 TMDS encoder (DDWG DVI 1.0 spec, section 3.2). Returns (symbol, new disparity)."""
     if not de:
         return CONTROL_TOKENS[c], 0
 

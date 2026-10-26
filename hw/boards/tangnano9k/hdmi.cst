@@ -1,3 +1,4 @@
+// From https://github.com/YosysHQ/apicula/blob/master/examples/tangnano9k.cst
 IO_LOC "tmds_clk_p" 69;
 IO_PORT "tmds_clk_p" IO_TYPE=LVDS25E PULL_MODE=NONE DRIVE=8;
 IO_LOC "tmds_clk_n" 68;

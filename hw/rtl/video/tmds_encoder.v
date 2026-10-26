@@ -1,5 +1,6 @@
 // DVI 1.0 TMDS encoder, one cycle of latency. Sends data while de is high,
 // otherwise the control token for c.
+// Algorithm and control tokens: Digital Visual Interface 1.0 (DDWG, 1999), section 3.2.
 module tmds_encoder (
     input  wire       clk,
     input  wire [7:0] d,

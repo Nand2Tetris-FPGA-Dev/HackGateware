@@ -1,3 +1,4 @@
+// From https://github.com/sipeed/TangNano-9K-example (led, uart and picotiny .cst files)
 IO_LOC "clk" 52;
 IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 

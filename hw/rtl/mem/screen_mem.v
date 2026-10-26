@@ -20,7 +20,8 @@ module screen_mem (
         vdata = 16'd0;
     end
 
-    // Write-first: Gowin's dual port BSRAM can't return the old word on a write
+    // Write-first: dual port BSRAM on GW1N can't do read-before-write
+    // (Gowin UG285; yosys techlibs/gowin/brams.txt, $__GOWIN_DP_)
     always @(posedge clk) begin
         if (we) begin
             mem[addr] <= din;

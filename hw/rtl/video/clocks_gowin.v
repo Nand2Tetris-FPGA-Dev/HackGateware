@@ -1,4 +1,7 @@
 // 27 MHz -> 126 MHz serial clock (rPLL: 27 / 3 * 14) -> 25.2 MHz pixel clock (CLKDIV / 5)
+// PLL settings from Apicula's Tang Nano 9K DVI example:
+//   https://github.com/YosysHQ/apicula/blob/master/examples/DVI/pll480.v
+// rPLL and CLKDIV: Gowin UG286, Gowin Clock User Guide
 module clocks_gowin (
     input  wire clk27,
     output wire clk_pix,
