@@ -16,7 +16,7 @@ IO_PORT "led[4]" PULL_MODE=UP DRIVE=8;
 IO_LOC "led[5]" 16;
 IO_PORT "led[5]" PULL_MODE=UP DRIVE=8;
 
-// S1 is pin 4, S2 is pin 3
+// S1 is pin 4, S2 is pin 3 (found by testing on the board, not from Sipeed's files)
 IO_LOC "btn_s1" 4;
 IO_PORT "btn_s1" PULL_MODE=UP;
 IO_LOC "btn_s2" 3;
