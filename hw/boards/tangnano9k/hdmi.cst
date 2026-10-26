@@ -1,0 +1,19 @@
+// From https://github.com/YosysHQ/apicula/blob/master/examples/tangnano9k.cst
+IO_LOC "tmds_clk_p" 69;
+IO_PORT "tmds_clk_p" IO_TYPE=LVDS25E PULL_MODE=NONE DRIVE=8;
+IO_LOC "tmds_clk_n" 68;
+IO_PORT "tmds_clk_n" IO_TYPE=LVDS25E PULL_MODE=NONE DRIVE=8;
+
+// d[0] blue, d[1] green, d[2] red
+IO_LOC "tmds_d_p[0]" 71;
+IO_PORT "tmds_d_p[0]" IO_TYPE=LVDS25E PULL_MODE=NONE DRIVE=8;
+IO_LOC "tmds_d_n[0]" 70;
+IO_PORT "tmds_d_n[0]" IO_TYPE=LVDS25E PULL_MODE=NONE DRIVE=8;
+IO_LOC "tmds_d_p[1]" 73;
+IO_PORT "tmds_d_p[1]" IO_TYPE=LVDS25E PULL_MODE=NONE DRIVE=8;
+IO_LOC "tmds_d_n[1]" 72;
+IO_PORT "tmds_d_n[1]" IO_TYPE=LVDS25E PULL_MODE=NONE DRIVE=8;
+IO_LOC "tmds_d_p[2]" 75;
+IO_PORT "tmds_d_p[2]" IO_TYPE=LVDS25E PULL_MODE=NONE DRIVE=8;
+IO_LOC "tmds_d_n[2]" 74;
+IO_PORT "tmds_d_n[2]" IO_TYPE=LVDS25E PULL_MODE=NONE DRIVE=8;

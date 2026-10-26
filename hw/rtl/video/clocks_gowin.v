@@ -1,0 +1,66 @@
+// 27 MHz -> 126 MHz serial clock (rPLL: 27 / 3 * 14) -> 25.2 MHz pixel clock (CLKDIV / 5)
+// PLL settings from Apicula's Tang Nano 9K DVI example:
+//   https://github.com/YosysHQ/apicula/blob/master/examples/DVI/pll480.v
+// rPLL and CLKDIV: Gowin UG286, Gowin Clock User Guide
+module clocks_gowin (
+    input  wire clk27,
+    output wire clk_pix,
+    output wire clk_ser,
+    output wire locked
+);
+
+    // Pinned to the right-hand PLL: gowin_pack in OSS CAD Suite 2026-08-21 crashes on
+    // the left one (X0Y9) because GW1N_9C.get_pll_bels() only handles x > 27.
+    // Fixed in later Apicula (GW1N_9C.get_pll_bels in
+    // https://github.com/YosysHQ/apicula/blob/master/apycula/gowin_pack.py);
+    // this pin can go when the toolchain is updated.
+    (* BEL = "X46Y9/PLL" *)
+    rPLL #(
+        .FCLKIN("27"),
+        .DYN_IDIV_SEL("false"),
+        .IDIV_SEL(2),
+        .DYN_FBDIV_SEL("false"),
+        .FBDIV_SEL(13),
+        .DYN_ODIV_SEL("false"),
+        .ODIV_SEL(4),
+        .PSDA_SEL("0000"),
+        .DYN_DA_EN("true"),
+        .DUTYDA_SEL("1000"),
+        .CLKOUT_FT_DIR(1'b1),
+        .CLKOUTP_FT_DIR(1'b1),
+        .CLKOUT_DLY_STEP(0),
+        .CLKOUTP_DLY_STEP(0),
+        .CLKFB_SEL("internal"),
+        .CLKOUT_BYPASS("false"),
+        .CLKOUTP_BYPASS("false"),
+        .CLKOUTD_BYPASS("false"),
+        .DYN_SDIV_SEL(2),
+        .CLKOUTD_SRC("CLKOUT"),
+        .CLKOUTD3_SRC("CLKOUT"),
+        .DEVICE("GW1N-9C")
+    ) pll (
+        .CLKIN(clk27),
+        .CLKOUT(clk_ser),
+        .LOCK(locked),
+        .CLKOUTP(),
+        .CLKOUTD(),
+        .CLKOUTD3(),
+        .RESET(1'b0),
+        .RESET_P(1'b0),
+        .CLKFB(1'b0),
+        .FBDSEL(6'd0),
+        .IDSEL(6'd0),
+        .ODSEL(6'd0),
+        .PSDA(4'd0),
+        .DUTYDA(4'd0),
+        .FDLY(4'd0)
+    );
+
+    CLKDIV #(.DIV_MODE("5")) div5 (
+        .HCLKIN(clk_ser),
+        .RESETN(locked),
+        .CALIB(1'b0),
+        .CLKOUT(clk_pix)
+    );
+
+endmodule

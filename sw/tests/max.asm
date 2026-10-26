@@ -1,0 +1,20 @@
+// RAM[2] = max(RAM[0], RAM[1])
+@R0
+D=M
+@R1
+D=D-M
+@FIRST
+D;JGT
+@R1
+D=M
+@STORE
+0;JMP
+(FIRST)
+@R0
+D=M
+(STORE)
+@R2
+M=D
+(END)
+@END
+0;JMP

@@ -4,8 +4,18 @@ write-changes = true
 check-hidden = true
 quiet-level = 3
 builtin = ["clear", "rare", "en-GB_to_en-US"]
+ignore-words-list = "dout,ser"
 skip = [
 	".mailmap",
 	"*.gitignore",
 	"AUTHORS.md",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["hw/sim/tests"]
+pythonpath = ["hw/sim"]
+markers = [
+	"requires_iverilog: skip when iverilog is not on PATH",
+	"requires_yosys: skip when yosys is not on PATH",
+	"requires_env(*names): skip when any of these environment variables is unset",
 ]

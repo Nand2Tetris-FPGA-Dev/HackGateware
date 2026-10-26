@@ -1,56 +1,52 @@
 # HackGateware
 
-The nand2tetris Hack computer in Verilog, running on the
-[Sipeed Tang Nano 9K](https://wiki.sipeed.com/hardware/en/tang/Tang-Nano-9K/Nano-9K.html).
-It's built only with the open-source Gowin toolchain.
+The nand2tetris Hack computer in Verilog for the
+[Sipeed Tang Nano 9K](https://wiki.sipeed.com/hardware/en/tang/Tang-Nano-9K/Nano-9K.html),
+built with the open source Gowin toolchain.
 
-Students write Hack programs as usual and load them from the board's external
-SPI flash. The computer itself stays in the FPGA's internal flash, so they never
-have to rebuild or reflash it.
+The computer lives in the FPGA's internal flash. Student programs are loaded
+from the board's external SPI flash, so they never have to rebuild the computer.
 
-> **Status:** early development. Nothing here builds yet. The first milestone,
-> due 2026-12-01, is the Hack computer booting a program from flash and showing
-> the Hack screen over HDMI.
+Work in progress. The first milestone (Dec 2026) is booting a program from flash
+and showing the Hack screen over HDMI.
 
-## What it is
+## Design
 
-- **CPU, ALU, and memory map:** exactly as in the book. That's 32K words of
-  program memory, RAM at 0–16383, the screen at 16384–24575, and the keyboard
-  at 24576.
-- **Program memory:** PSRAM, filled at power-on by a boot loader that copies a
-  CRC-checked program image from external flash. If PSRAM doesn't work with
-  the open toolchain, the fallback is to run programs straight from flash.
-- **Video:** HDMI at 640×480, 60 Hz. The 512×256 Hack screen is centered 1:1.
-- **Language:** plain Verilog-2005. The one exception is a vendored PSRAM
-  controller in SystemVerilog.
-
-## Toolchain
-
-All of these come in
-[OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build), pinned to the
-**2026-08-21** release:
-
-- Yosys, nextpnr-himbaechel, and Apicula (`gowin_pack`), for synthesis,
-  place-and-route, and bitstream packing
-- openFPGALoader, for flashing the board
-- Icarus Verilog, for simulation
-
-The Gowin IDE isn't used.
+- Book CPU, ALU and memory map: 32K word ROM, RAM at 0-16383, screen at
+  16384-24575, keyboard at 24576.
+- Program memory is PSRAM, loaded at power-on from external flash with a CRC
+  check. If PSRAM doesn't work with the open tools we fall back to running
+  straight from flash.
+- HDMI output at 640x480, with the 512x256 Hack screen centered.
+- Verilog-2005, except the vendored PSRAM controller (SystemVerilog).
 
 ## Layout
 
 ```text
-hw/
-  rtl/      the computer: cpu/, mem/, progmem/, io/, video/, top/
-  sim/      testbenches, simulation models, and the tests that run them
-  boards/   pin constraints for each board (tangnano9k/)
-  spikes/   small test designs used to check board features
+hw/rtl/       the computer
+hw/sim/       testbenches and pytest tests
+hw/boards/    pin constraints
+hw/spikes/    small designs for checking board features
+hw/builds.toml
+sw/           Hack test programs
 ```
 
-## Getting started
+## Building
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, branches, and commit rules.
+You need [OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build) 2026-08-21
+on `PATH`, and `hacktools` from the DevelopmentTools repo (private) cloned next to
+this one:
+
+```bash
+python -m pip install -e "../DevelopmentTools/tools/hacktools[dev]"
+pytest
+hacktools hw build spike_blinky
+hacktools hw load spike_blinky      # SRAM, lost on power-off
+hacktools hw install spike_blinky   # internal flash
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and branch rules.
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE).
+Apache 2.0

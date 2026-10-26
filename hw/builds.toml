@@ -1,0 +1,36 @@
+[spike_blinky]
+top = "top"
+sources = ["hw/spikes/blinky/top.v"]
+cst = ["hw/boards/tangnano9k/base.cst"]
+
+[spike_hdmi_bars]
+top = "top"
+sources = [
+  "hw/spikes/hdmi_bars/top.v",
+  "hw/rtl/video/clocks_gowin.v",
+  "hw/rtl/video/video_timing_640x480.v",
+  "hw/rtl/video/tmds_encoder.v",
+  "hw/rtl/video/hdmi_phy_gowin.v",
+]
+cst = ["hw/boards/tangnano9k/base.cst", "hw/boards/tangnano9k/hdmi.cst"]
+
+[mvp]
+top = "top"
+rom_words = 2048
+sources = [
+  "hw/rtl/top/top_tangnano9k_mvp.v",
+  "hw/rtl/top/hack_computer.v",
+  "hw/rtl/top/reset_sync.v",
+  "hw/rtl/cpu/hack_cpu.v",
+  "hw/rtl/cpu/hack_alu.v",
+  "hw/rtl/mem/hack_memory.v",
+  "hw/rtl/mem/ram16k.v",
+  "hw/rtl/mem/screen_mem.v",
+  "hw/rtl/progmem/progmem_rom.v",
+  "hw/rtl/video/clocks_gowin.v",
+  "hw/rtl/video/video_timing_640x480.v",
+  "hw/rtl/video/hack_fb_reader.v",
+  "hw/rtl/video/tmds_encoder.v",
+  "hw/rtl/video/hdmi_phy_gowin.v",
+]
+cst = ["hw/boards/tangnano9k/base.cst", "hw/boards/tangnano9k/hdmi.cst"]
