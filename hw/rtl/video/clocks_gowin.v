@@ -9,6 +9,10 @@ module clocks_gowin (
     output wire locked
 );
 
+    // Pinned to the right-hand PLL: gowin_pack in OSS CAD Suite 2026-08-21 crashes on
+    // the left one (X0Y9) because GW1N_9C.get_pll_bels() only handles x > 27.
+    // Fixed in later Apicula; this pin can go when the toolchain is updated.
+    (* BEL = "X46Y9/PLL" *)
     rPLL #(
         .FCLKIN("27"),
         .DYN_IDIV_SEL("false"),

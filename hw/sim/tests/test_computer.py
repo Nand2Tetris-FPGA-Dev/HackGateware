@@ -65,6 +65,12 @@ def test_screen_pattern():
     assert_matches(program("screen_pattern"), 400_000)
 
 
+def test_runs_from_board_rom():
+    sim = run_computer(program("screen_pattern"), 400_000, progmem="rom")
+    _, ram, screen = golden(program("screen_pattern"), 400_000)
+    assert sim.screen == screen and sim.ram == ram
+
+
 def test_latency_independent():
     rom = program("screen_pattern")
     fast = run_computer(rom, 20_000, pm_latency=1)

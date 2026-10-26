@@ -37,6 +37,7 @@ COMPUTER_SOURCES = [
     HW / "sim/tb/tb_computer.v",
     HW / "rtl/top/hack_computer.v",
     HW / "rtl/progmem/progmem_sim.v",
+    HW / "rtl/progmem/progmem_rom.v",
     HW / "rtl/cpu/hack_cpu.v",
     HW / "rtl/cpu/hack_alu.v",
     HW / "rtl/mem/hack_memory.v",
@@ -64,9 +65,11 @@ def run_computer(
     reset_at: int | None = None,
     pm_latency: int = 1,
     trace: bool = True,
+    progmem: str = "sim",
 ) -> SimResult:
     """Run the RTL computer for `steps` instructions. keyboard takes at most one
-    (step, value) pair, applied before that step."""
+    (step, value) pair, applied before that step. progmem is "sim" (progmem_sim
+    with pm_latency) or "rom" (the board's progmem_rom)."""
     if keyboard and len(keyboard) > 1:
         raise ValueError("run_computer supports one keyboard change")
     with tempfile.TemporaryDirectory() as tmp:
@@ -84,8 +87,11 @@ def run_computer(
             plusargs["RESET_AT"] = str(reset_at)
         if trace:
             plusargs["TRACE"] = "1"
+        defines = {"PM_LATENCY": str(pm_latency)}
+        if progmem == "rom":
+            defines.update({"PROGMEM_ROM": "1", "ROM_HEX": '"rom.hex"'})
         out = iverilog(COMPUTER_SOURCES, "tb_computer", plusargs=plusargs,
-                       defines={"PM_LATENCY": str(pm_latency)}, cwd=work)
+                       defines=defines, cwd=work)
         if "DONE" not in out:
             raise SimError(out)
         lines = (work / "trace.txt").read_text().splitlines() if trace else []

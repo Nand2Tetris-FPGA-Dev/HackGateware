@@ -21,10 +21,18 @@ module tb_computer;
         .dbg_exec(dbg_exec)
     );
 
+`ifdef PROGMEM_ROM
+    // The board's ROM; it loads rom.hex itself through ROM_HEX
+    progmem_rom #(.WORDS(2048)) pm (
+        .clk(clk), .fetch_req(pm_req), .fetch_addr(pm_addr),
+        .fetch_ready(pm_ready), .fetch_data(pm_data)
+    );
+`else
     progmem_sim #(.LATENCY(`PM_LATENCY)) pm (
         .clk(clk), .fetch_req(pm_req), .fetch_addr(pm_addr),
         .fetch_ready(pm_ready), .fetch_data(pm_data)
     );
+`endif
 
     always #5 clk = ~clk;
     always #6 vclk = ~vclk;
@@ -39,7 +47,9 @@ module tb_computer;
         if (!$value$plusargs("KBD_AT=%d", kbd_at)) kbd_at = -1;
         if (!$value$plusargs("KBD_VAL=%d", kbd_val)) kbd_val = 0;
         if (!$value$plusargs("RESET_AT=%d", reset_at)) reset_at = -1;
+`ifndef PROGMEM_ROM
         if (rom_words > 0) $readmemh("rom.hex", pm.mem, 0, rom_words - 1);
+`endif
         if ($test$plusargs("RAMINIT")) $readmemh("ram_init.hex", dut.u_mem.u_ram.mem);
         if ($test$plusargs("TRACE")) trace_fd = $fopen("trace.txt", "w");
         if (kbd_at == 0) keyboard = kbd_val;
