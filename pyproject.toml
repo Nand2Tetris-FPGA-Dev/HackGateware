@@ -11,8 +11,10 @@ skip = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tools/hacktools/tests", "hw/sim/tests"]
-pythonpath = ["tools/hacktools/src", "hw/sim"]
+# hacktools (assembler, emulator, build helper) lives in the DevelopmentTools repo
+# and is installed with pip; see CONTRIBUTING.md.
+testpaths = ["hw/sim/tests"]
+pythonpath = ["hw/sim"]
 markers = [
 	"requires_iverilog: skip when iverilog is not on PATH",
 	"requires_yosys: skip when yosys is not on PATH",

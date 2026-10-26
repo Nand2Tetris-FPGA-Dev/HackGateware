@@ -46,11 +46,13 @@ hw/
   boards/   pin constraints for each board (tangnano9k/)
   spikes/   small test designs used to check board features (results in RESULTS.md)
   builds.toml  the bitstreams hacktools can build
-tools/
-  hacktools/   dev tooling: bitstream builds, loading, and (later) the assembler,
-               emulator, and program flashing. Not the student n2t CLI.
 sw/            Hack test programs and demos
 ```
+
+The dev tooling (`hacktools`: bitstream builds, board loading, the Hack assembler,
+and later the emulator) lives in the private
+[DevelopmentTools](https://github.com/Nand2Tetris-FPGA-Dev/DevelopmentTools) repo,
+under `tools/hacktools`. The tests here need it installed.
 
 ## Getting started
 
@@ -58,12 +60,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, branches, and commit rules.
 
 ## Build
 
-The FPGA tools from OSS CAD Suite must be on `PATH`. Install the dev tooling and
-run everything from the repo root:
+The FPGA tools from OSS CAD Suite must be on `PATH`. Clone DevelopmentTools next to
+this repo, install `hacktools` from it, and run everything from this repo's root:
 
 ```bash
-python -m pip install -e "tools/hacktools[dev]"
-pytest                                 # simulation and tool tests
+python -m pip install -e "../DevelopmentTools/tools/hacktools[dev]"
+pytest                                 # simulation tests
 hacktools hw build spike_blinky        # writes build/spike_blinky/spike_blinky.fs
 hacktools hw load spike_blinky         # into FPGA SRAM: gone after a power-cycle
 hacktools hw install spike_blinky      # into internal flash: boots at power-on

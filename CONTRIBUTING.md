@@ -2,12 +2,16 @@
 
 ## Setup
 
-You need Git and Python 3.10 or later.
+You need Git, Python 3.11 or later, and OSS CAD Suite 2026-08-21 (FPGA Workbench
+installs it).
 
-1. Clone the repo:
+1. Clone this repo and the private DevelopmentTools repo side by side, then
+   install `hacktools` (the build helper, assembler, and emulator the tests use):
 
    ```bash
    git clone https://github.com/Nand2Tetris-FPGA-Dev/HackGateware.git
+   git clone https://github.com/Nand2Tetris-FPGA-Dev/DevelopmentTools.git
+   python -m pip install -e "DevelopmentTools/tools/hacktools[dev]"
    cd HackGateware
    ```
 
