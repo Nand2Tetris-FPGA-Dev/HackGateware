@@ -38,6 +38,7 @@ module tb_computer;
     always #6 vclk = ~vclk;
 
     integer steps, rom_words, kbd_at = -1, kbd_val = 0, reset_at = -1;
+    integer reset_delay = 0, reset_len = 2;
     integer executed = 0, cycles = 0, trace_fd = 0, fd, i;
     reg [14:0] pc_before;
 
@@ -47,6 +48,8 @@ module tb_computer;
         if (!$value$plusargs("KBD_AT=%d", kbd_at)) kbd_at = -1;
         if (!$value$plusargs("KBD_VAL=%d", kbd_val)) kbd_val = 0;
         if (!$value$plusargs("RESET_AT=%d", reset_at)) reset_at = -1;
+        if (!$value$plusargs("RESET_DELAY=%d", reset_delay)) reset_delay = 0;
+        if (!$value$plusargs("RESET_LEN=%d", reset_len)) reset_len = 2;
 `ifndef PROGMEM_ROM
         if (rom_words > 0) $readmemh("rom.hex", pm.mem, 0, rom_words - 1);
 `endif
@@ -69,9 +72,12 @@ module tb_computer;
             if (trace_fd) $fdisplay(trace_fd, "%04x %04x %04x", pc_before, dbg_a, dbg_d);
             executed = executed + 1;
             if (executed == kbd_at) keyboard = kbd_val;
+            // Reset RESET_DELAY cycles after this instruction, for RESET_LEN cycles,
+            // so a test can land it in the fetch or execute phase
             if (executed == reset_at) begin
-                reset = 1;
-                repeat (2) @(posedge clk);
+                repeat (reset_delay) @(posedge clk);
+                #1 reset = 1;
+                repeat (reset_len) @(posedge clk);
                 #1 reset = 0;
             end
             if (executed == steps) finish_run;

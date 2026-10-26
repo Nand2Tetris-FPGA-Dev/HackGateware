@@ -66,6 +66,8 @@ def run_computer(
     pm_latency: int = 1,
     trace: bool = True,
     progmem: str = "sim",
+    reset_delay: int = 0,
+    reset_len: int = 2,
 ) -> SimResult:
     """Run the RTL computer for `steps` instructions. keyboard takes at most one
     (step, value) pair, applied before that step. progmem is "sim" (progmem_sim
@@ -85,6 +87,8 @@ def run_computer(
             plusargs["KBD_AT"], plusargs["KBD_VAL"] = (str(x) for x in keyboard[0])
         if reset_at is not None:
             plusargs["RESET_AT"] = str(reset_at)
+            plusargs["RESET_DELAY"] = str(reset_delay)
+            plusargs["RESET_LEN"] = str(reset_len)
         if trace:
             plusargs["TRACE"] = "1"
         defines = {"PM_LATENCY": str(pm_latency)}

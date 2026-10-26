@@ -85,6 +85,20 @@ def test_reset_midrun_restarts():
     assert sim.trace[500:] == fresh
 
 
+def test_short_reset_during_fetch():
+    # Reset pulses for one cycle while a slow fetch is in flight; that fetch's
+    # instruction must be thrown away, not run at PC 0
+    rom = program("screen_pattern")
+    sim = run_computer(rom, 3000, reset_at=500, reset_delay=3, reset_len=1, pm_latency=37)
+    assert sim.trace[500:] == HackMachine(rom).run(2500)
+
+
+def test_short_reset_during_execute():
+    rom = program("screen_pattern")
+    sim = run_computer(rom, 3000, reset_at=500, reset_delay=2, reset_len=1)
+    assert sim.trace[500:] == HackMachine(rom).run(2500)
+
+
 @pytest.mark.requires_env("N2T_PROJECTS")
 def test_book_pong_asm():
     pong = Path(os.environ["N2T_PROJECTS"]) / "6" / "pong" / "Pong.asm"

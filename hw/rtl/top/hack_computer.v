@@ -52,13 +52,19 @@ module hack_computer (
     assign dbg_pc = pc;
 
     // A fetch already in flight when reset arrives is still waited out, so a
-    // late pm_ready can't be taken for the next fetch.
+    // late pm_ready can't be taken for the next fetch. Its instruction is for
+    // the old PC, so it's dropped even if reset is already gone by then.
+    reg drop = 1'b0;
+
     always @(posedge clk) begin
         case (state)
             REQ:  if (!reset) state <= WAIT;
             WAIT: if (pm_ready) begin
                       dbg_instr <= pm_data;
-                      state <= reset ? REQ : EXEC;
+                      state <= (reset | drop) ? REQ : EXEC;
+                      drop <= 1'b0;
+                  end else if (reset) begin
+                      drop <= 1'b1;
                   end
             default: state <= REQ;
         endcase
