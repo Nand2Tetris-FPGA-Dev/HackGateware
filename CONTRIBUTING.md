@@ -2,76 +2,42 @@
 
 ## Setup
 
-You need Git, Python 3.11 or later, and OSS CAD Suite 2026-08-21 (FPGA Workbench
-installs it).
+You need Git, Python 3.11+, and OSS CAD Suite 2026-08-21.
 
-1. Clone this repo and the private DevelopmentTools repo side by side, then
-   install `hacktools` (the build helper, assembler, and emulator the tests use):
+```bash
+git clone https://github.com/Nand2Tetris-FPGA-Dev/HackGateware.git
+git clone https://github.com/Nand2Tetris-FPGA-Dev/DevelopmentTools.git
+python -m pip install -e "DevelopmentTools/tools/hacktools[dev]"
+cd HackGateware
+./setup.sh        # or ./setup.ps1 on Windows
+```
 
-   ```bash
-   git clone https://github.com/Nand2Tetris-FPGA-Dev/HackGateware.git
-   git clone https://github.com/Nand2Tetris-FPGA-Dev/DevelopmentTools.git
-   python -m pip install -e "DevelopmentTools/tools/hacktools[dev]"
-   cd HackGateware
-   ```
+The setup script installs pre-commit and the git hooks. If PowerShell won't run
+it, use `powershell -ExecutionPolicy Bypass -File setup.ps1`, or do it by hand:
 
-2. Run the setup script. It installs [pre-commit](https://pre-commit.com),
-   registers the git hooks, and runs every check once.
-
-   - macOS / Linux / WSL: `./setup.sh`
-   - Windows (PowerShell): `./setup.ps1`
-
-     If PowerShell refuses to run scripts, use
-     `powershell -ExecutionPolicy Bypass -File setup.ps1`.
-
-   If the script can't find `pip`, you can do the same steps by hand:
-
-   ```bash
-   python -m pip install --user pre-commit
-   python -m pre_commit install
-   python -m pre_commit run --all-files
-   ```
+```bash
+python -m pip install --user pre-commit
+python -m pre_commit install
+```
 
 ## Branches
 
-```text
-main  <-  dev  <-  feat/<name>
-```
+`main` <- `dev` <- `feat/<name>`
 
-- Work on a `feat/<name>` branch made from `dev`.
-- Open a pull request into `dev`. It's squash-merged.
-- `dev` is merged into `main` for releases.
-- The hooks block commits made directly on `main` or `dev`.
+Branch off `dev` and open a PR back into it (squash merge). `dev` gets merged
+into `main` for releases. The hooks won't let you commit directly to `main` or
+`dev`.
 
 ## Commits
 
-Each commit message is one line in
-[Conventional Commits](https://www.conventionalcommits.org) form:
+One line, [Conventional Commits](https://www.conventionalcommits.org) style,
+lowercase, no trailing period:
 
 ```text
-<type>(<scope>): <summary>
+feat(cpu): add hack alu
 ```
 
-For example: `feat(cpu): add hack alu`. Use lowercase, keep it to 72
-characters or fewer, and leave off the final period.
+## Style
 
-## Checks
-
-The pre-commit hooks run on every commit, and
-[pre-commit.ci](https://pre-commit.ci) runs them again on each pull request.
-They check:
-
-- trailing whitespace and the final newline at the end of each file
-- LF line endings
-- YAML and TOML syntax
-- large files and private keys
-- spelling (codespell)
-
-All text files use LF line endings, on every OS. `.gitattributes` and
-`.editorconfig` set this up, so you shouldn't have to change anything.
-
-## Code style
-
-- Write plain Verilog-2005 unless a vendored file needs otherwise.
-- Indent with 2 spaces, and keep lines to 100 characters or fewer
-  (see `.editorconfig`).
+Verilog-2005, 2 space indent, 100 column lines. Everything uses LF line endings
+(`.gitattributes` handles this).

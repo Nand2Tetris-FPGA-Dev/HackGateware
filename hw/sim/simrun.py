@@ -1,5 +1,3 @@
-"""Run Icarus Verilog simulations from Python tests."""
-
 import subprocess
 import tempfile
 from pathlib import Path
@@ -16,7 +14,6 @@ def iverilog(
     defines: dict[str, str] | None = None,
     cwd: Path | None = None,
 ) -> str:
-    """Compile `sources` with `top` as the root module, run it, and return stdout."""
     with tempfile.TemporaryDirectory() as tmp:
         vvp_file = Path(tmp) / f"{top}.vvp"
         compile_argv = ["iverilog", "-g2012", "-s", top, "-o", str(vvp_file)]

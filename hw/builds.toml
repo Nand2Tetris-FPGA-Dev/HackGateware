@@ -1,6 +1,3 @@
-# Bitstreams that `hacktools hw build NAME` knows how to make.
-# Paths are relative to the repo root. `cst` files are joined in order.
-
 [spike_blinky]
 top = "top"
 sources = ["hw/spikes/blinky/top.v"]

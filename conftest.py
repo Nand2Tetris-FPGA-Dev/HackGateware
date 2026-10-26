@@ -1,5 +1,3 @@
-"""Shared pytest setup: skip tests whose tools or environment variables are missing."""
-
 import os
 import shutil
 

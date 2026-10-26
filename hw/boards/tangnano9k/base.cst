@@ -1,8 +1,7 @@
-// Tang Nano 9K base pins: 27 MHz clock, 6 LEDs and 2 buttons (all active low).
-// Checked against Sipeed's TangNano-9K-example (led/, uart/, picotiny/) on 2026-10-24.
 IO_LOC "clk" 52;
 IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
+// LEDs and buttons are active low
 IO_LOC "led[0]" 10;
 IO_PORT "led[0]" PULL_MODE=UP DRIVE=8;
 IO_LOC "led[1]" 11;
@@ -16,8 +15,7 @@ IO_PORT "led[4]" PULL_MODE=UP DRIVE=8;
 IO_LOC "led[5]" 16;
 IO_PORT "led[5]" PULL_MODE=UP DRIVE=8;
 
-// Buttons named by the board's silkscreen. Checked on the board 2026-10-24:
-// the button printed S1 is pin 4 and S2 is pin 3 (the plan had these swapped).
+// S1 is pin 4, S2 is pin 3
 IO_LOC "btn_s1" 4;
 IO_PORT "btn_s1" PULL_MODE=UP;
 IO_LOC "btn_s2" 3;
