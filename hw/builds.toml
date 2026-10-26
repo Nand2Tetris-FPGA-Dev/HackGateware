@@ -2,3 +2,14 @@
 top = "top"
 sources = ["hw/spikes/blinky/top.v"]
 cst = ["hw/boards/tangnano9k/base.cst"]
+
+[spike_hdmi_bars]
+top = "top"
+sources = [
+  "hw/spikes/hdmi_bars/top.v",
+  "hw/rtl/video/clocks_gowin.v",
+  "hw/rtl/video/video_timing_640x480.v",
+  "hw/rtl/video/tmds_encoder.v",
+  "hw/rtl/video/hdmi_phy_gowin.v",
+]
+cst = ["hw/boards/tangnano9k/base.cst", "hw/boards/tangnano9k/hdmi.cst"]
