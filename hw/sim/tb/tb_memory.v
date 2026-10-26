@@ -70,6 +70,8 @@ module tb_memory;
         expect_read(24600 & 15'h3fff, 16'h0000);
         expect_read(16384 + ((24600 - 16384) & 15'h1fff), 16'h0000);
         expect_read(24600, 16'h0000);
+        expect_read(16384, 16'h3333);        // 24576 must not alias onto the screen
+        expect_read(0, 16'h1111);            // or onto RAM
         if (errors == 0) $display("PASS unmapped");
 
         $finish;
