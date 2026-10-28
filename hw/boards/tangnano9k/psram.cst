@@ -1,7 +1,8 @@
 // Internal PSRAM (two W955D8MBYA dies, 1.8 V bank). Pin list from
 // psram_controller demo/tangnano9k/tangnano9k.cst at a2c41bd,
 // https://github.com/takayuki-nagata/psram_controller
-// Copyright (c) 2026 Takayuki Nagata, MIT (see hw/third_party/psram_controller/LICENSE).
+// Copyright (c) 2026 Takayuki Nagata
+// SPDX-License-Identifier: MIT (see hw/third_party/psram_controller/LICENSE)
 // Upstream derived the IOL locations from the Apicula GW1N-9C chip database.
 
 // Die 0

@@ -100,3 +100,5 @@ module progmem_psram (
     end
 
 endmodule
+
+`default_nettype wire
