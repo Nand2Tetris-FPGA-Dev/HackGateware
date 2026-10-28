@@ -44,3 +44,13 @@ sources = [
 ]
 cst = ["hw/boards/tangnano9k/base.cst", "hw/boards/tangnano9k/flash.cst"]
 pack_flags = ["--mspi_as_gpio"]
+
+# Task 12 gate passed on the board: PROGMEM = psram, read latency 35 cycles
+[spike_psram]
+top = "top"
+sources = [
+  "hw/spikes/psram_test/top.v",
+  "hw/rtl/mem/psram_ctrl.v",
+  "hw/rtl/top/reset_sync.v",
+]
+cst = ["hw/boards/tangnano9k/base.cst", "hw/boards/tangnano9k/psram.cst"]

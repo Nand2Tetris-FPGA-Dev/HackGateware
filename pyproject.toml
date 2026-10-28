@@ -4,11 +4,12 @@ write-changes = true
 check-hidden = true
 quiet-level = 3
 builtin = ["clear", "rare", "en-GB_to_en-US"]
-ignore-words-list = "dout,ser"
+ignore-words-list = "dout,ser,inout"
 skip = [
 	".mailmap",
 	"*.gitignore",
 	"AUTHORS.md",
+	"hw/third_party/*",
 ]
 
 [tool.pytest.ini_options]
