@@ -1,9 +1,13 @@
+import os
 from pathlib import Path
 
+import pytest
 from hacktools.assembler import assemble
 from hacktools.emulator import HackMachine
+from hacktools.pipeline import build_program, compiler_command
 
-PROGRAMS = Path(__file__).resolve().parents[3] / "sw" / "tests"
+SW = Path(__file__).resolve().parents[3] / "sw"
+PROGRAMS = SW / "tests"
 
 
 def machine(name: str) -> HackMachine:
@@ -49,3 +53,22 @@ def test_fill_follows_the_keyboard():
     assert m.screen() == [0xFFFF] * 8192
     m.run(300_000, keyboard=[(0, 0)])
     assert m.screen() == [0] * 8192
+
+
+@pytest.mark.requires_env("N2T_OS_DIR", "N2T_JACK_COMPILER")
+def test_math_demo():
+    words = build_program(
+        SW / "demo" / "MathDemo",
+        Path(os.environ["N2T_OS_DIR"]),
+        compiler_command(os.environ["N2T_JACK_COMPILER"]),
+    )
+    assert len(words) < 32768
+    m = HackMachine(words)
+    # OS boot alone is ~6.7M instructions
+    for _ in range(30):
+        m.run(500_000)
+        if m.ram[16006] == 1:
+            break
+    assert m.ram[16006] == 1
+    assert m.ram[16000:16006] == [5535, 142, 12, 17, 0xEA61, 5040]
+    assert any(m.screen()[: 11 * 32]), "first text line is blank"
