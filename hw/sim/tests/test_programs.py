@@ -64,7 +64,7 @@ def test_math_demo():
     )
     assert len(words) < 32768
     m = HackMachine(words)
-    # OS boot alone is ~8.9M instructions
+    # OS boot alone is ~6.7M instructions
     for _ in range(30):
         m.run(500_000)
         if m.ram[16006] == 1:
