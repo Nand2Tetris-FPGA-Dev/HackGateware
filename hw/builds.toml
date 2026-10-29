@@ -84,3 +84,12 @@ cst = [
   "hw/boards/tangnano9k/flash.cst",
 ]
 pack_flags = ["--mspi_as_gpio"]
+
+[spike_lcd]
+top = "top"
+sources = [
+  "hw/spikes/lcd_bars/top.v",
+  "hw/rtl/debug/st7789_driver.v",
+  "hw/rtl/top/reset_sync.v",
+]
+cst = ["hw/boards/tangnano9k/base.cst", "hw/boards/tangnano9k/lcd.cst"]
