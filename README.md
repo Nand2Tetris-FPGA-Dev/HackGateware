@@ -76,11 +76,11 @@ hacktools prog flash sw/demo/MathDemo --slot 0
 
 `prog flash`, `prog build` and `emulate` take a `.hack`, `.asm` or `.vm` file, or a
 folder of `.jack` or `.vm` files. The OS plus a program must fit in the 32K word
-ROM; the book's Pong builds to 28267 words.
+ROM; the book's Pong builds to 29149 words.
 
-MathDemo prints six results from the OS `Math` class. The OS runs about 9M
+MathDemo prints six results from the OS `Math` class. The OS runs about 7M
 instructions before `Main.main` (mostly `Output.init`), so the first line shows about
-7 s after the program starts.
+5.5 s after the program starts.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and branch rules.
 
