@@ -1,0 +1,30 @@
+// Prints a few results from the OS Math class and stores each one in RAM
+// 16000-16005 for the tests; RAM 16006 = 1 when done. The heap fills up
+// from 2048, so this small program never reaches 16000.
+class Main {
+    function void main() {
+        do Main.show("123 * 45 = ", 0, 123 * 45);
+        do Main.show("1000 / 7 = ", 1, 1000 / 7);
+        do Main.show("sqrt(144) = ", 2, Math.sqrt(144));
+        do Main.show("max(17, -5) = ", 3, Math.max(17, -5));
+        do Main.show("-123 * 45 = ", 4, -123 * 45);
+        do Main.show("fact(7) = ", 5, Main.fact(7));
+        do Memory.poke(16006, 1);
+        return;
+    }
+
+    function void show(String label, int slot, int value) {
+        do Output.printString(label);
+        do Output.printInt(value);
+        do Output.println();
+        do Memory.poke(16000 + slot, value);
+        return;
+    }
+
+    function int fact(int n) {
+        if (n < 2) {
+            return 1;
+        }
+        return n * Main.fact(n - 1);
+    }
+}

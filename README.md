@@ -27,7 +27,8 @@ hw/sim/       testbenches and pytest tests
 hw/boards/    pin constraints
 hw/spikes/    small designs for checking board features
 hw/builds.toml
-sw/           Hack test programs
+sw/tests/     Hack test programs
+sw/demo/      Jack demo programs
 ```
 
 ## Building
@@ -44,6 +45,8 @@ hacktools hw load spike_blinky      # SRAM, lost on power-off
 hacktools hw install spike_blinky   # internal flash
 ```
 
+The Jack tests skip unless `N2T_OS_DIR` and `N2T_JACK_COMPILER` are set (see below).
+
 ## Running a program
 
 Install the computer once, then write programs to the external flash:
@@ -57,6 +60,27 @@ hacktools prog flash sw/tests/screen_pattern.asm --slot 0
 The board loads slot 0 at power-on. S1 restarts the program, S2 loads it
 from flash again. LEDs: 0 loading, 1 running, 2 no valid program in slot 0,
 3 CRC error, 4 PSRAM ready, 5 heartbeat.
+
+## Jack programs
+
+Jack programs are compiled with the nand2tetris JackCompiler (it needs Java) and
+linked with the nand2tetris OS. Both come with the
+[nand2tetris software suite](https://www.nand2tetris.org/software):
+
+```bash
+export N2T_OS_DIR=/path/to/nand2tetris/tools/OS
+export N2T_JACK_COMPILER=/path/to/nand2tetris/tools/JackCompiler.sh   # .bat on Windows
+hacktools emulate sw/demo/MathDemo --steps 12000000 --screen math.pbm
+hacktools prog flash sw/demo/MathDemo --slot 0
+```
+
+`prog flash`, `prog build` and `emulate` take a `.hack`, `.asm` or `.vm` file, or a
+folder of `.jack` or `.vm` files. The OS plus a program must fit in the 32K word
+ROM; the book's Pong builds to 28267 words.
+
+MathDemo prints six results from the OS `Math` class. The OS runs about 9M
+instructions before `Main.main` (mostly `Output.init`), so the first line shows about
+7 s after the program starts.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and branch rules.
 
