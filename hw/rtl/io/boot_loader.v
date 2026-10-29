@@ -1,6 +1,7 @@
 // Copies a program image from SPI flash to the program memory load port.
 // Image format (hacktools/image.py): 32-byte header, then words high byte first.
-//   0-3 "HACK", 4 version (1), 6-7 word count (1-32768), 8-11 CRC-32 of the data
+//   0-3 "HACK", 4 version (1), 6-7 word count (1-32768), 8-11 CRC-32 of the data,
+//   12-27 name (byte 12 ends up in name[127:120])
 // A bad header sets err_header before anything is written. Each load writes two
 // words: load_data = {word 2k+1, word 2k} at load_addr = 2k; strobe 0011 for the
 // last word of an odd count. done is set only if the CRC matches, else err_crc.
@@ -25,7 +26,8 @@ module boot_loader (
     output reg         done,
     output reg         err_header,
     output reg         err_crc,
-    output reg  [15:0] word_count
+    output reg  [15:0] word_count,
+    output reg  [127:0] name
 );
 
     localparam IDLE = 3'd0, HEADER = 3'd1, CHECK = 3'd2, DATA = 3'd3, LAST = 3'd4, HALT = 3'd5;
@@ -53,6 +55,7 @@ module boot_loader (
         err_header = 0;
         err_crc = 0;
         word_count = 0;
+        name = 0;
     end
 
     // CRC-32 as in zlib.crc32: reflected, poly 0xEDB88320, init and final XOR all ones.
@@ -108,6 +111,7 @@ module boot_loader (
                     if (hdr_idx == 6) count[15:8] <= rd_byte;
                     if (hdr_idx == 7) count[7:0] <= rd_byte;
                     if (hdr_idx >= 8 && hdr_idx < 12) crc_expect <= {crc_expect[23:0], rd_byte};
+                    if (hdr_idx >= 12 && hdr_idx < 28) name <= {name[119:0], rd_byte};
                     if (hdr_idx == 31) state <= CHECK;
                 end
 

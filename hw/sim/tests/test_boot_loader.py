@@ -130,3 +130,11 @@ def test_loader_bad_crc(tmp_path):
     image[32 + 777] ^= 0x01
     r, _ = _load(tmp_path, bytes(image))
     assert (r["done"], r["err_header"], r["err_crc"], r["busy"]) == ("0", "0", "1", "0")
+
+
+@pytest.mark.requires_iverilog
+@pytest.mark.parametrize("name", ["PONG", "ABCDEFGHIJKLMNOP"])
+def test_loader_keeps_name(tmp_path, name):
+    r, _ = _load(tmp_path, build_image(_words(5), name))
+    assert r["done"] == "1"
+    assert bytes.fromhex(r["name"]) == name.encode().ljust(16, b"\0")

@@ -32,12 +32,29 @@ module flash_boot_system (
     output wire        busy,
     output wire        running,
     output wire        err_header,
-    output wire        err_crc
+    output wire        err_crc,
+    output wire [2:0]  boot_state,
+    output wire [127:0] prog_name,
+    output wire [15:0] prog_words,
+    output wire [14:0] dbg_pc,
+    output wire [15:0] dbg_instr,
+    output wire [15:0] dbg_a,
+    output wire [15:0] dbg_d,
+    output wire [15:0] sp,
+    output wire [15:0] sp_max,
+    output wire [14:0] heap_hi
 );
 
     wire done;
     wire cpu_reset = ~por_n | ~done | s1;
     assign running = ~cpu_reset;
+
+    // 0 WAIT (no PSRAM yet), 1 LOAD (loading or S2 held), 2 RUN, 3 RESET (S1
+    // held), 4 NO IMG, 5 BADCRC
+    assign boot_state = err_header ? 3'd4 :
+                        err_crc    ? 3'd5 :
+                        done       ? (cpu_reset ? 3'd3 : 3'd2) :
+                        init_done  ? 3'd1 : 3'd0;
 
     wire rd_start, rd_stop, rd_valid, rd_ready;
     wire [23:0] rd_addr;
@@ -55,7 +72,7 @@ module flash_boot_system (
         .load_valid(load_valid), .load_ready(load_ready), .load_addr(load_addr),
         .load_data(load_data), .load_strb(load_strb),
         .busy(busy), .done(done), .err_header(err_header), .err_crc(err_crc),
-        .word_count()
+        .word_count(prog_words), .name(prog_name)
     );
 
     spi_flash_reader reader (
@@ -68,6 +85,9 @@ module flash_boot_system (
     wire pm_req, pm_ready;
     wire [14:0] pm_addr;
     wire [15:0] pm_data;
+    wire dbg_we;
+    wire [14:0] dbg_waddr;
+    wire [15:0] dbg_wdata;
 
     progmem_psram pm (
         .clk(clk), .rst_n(por_n),
@@ -83,7 +103,13 @@ module flash_boot_system (
         .clk(clk), .reset(cpu_reset),
         .pm_req(pm_req), .pm_addr(pm_addr), .pm_ready(pm_ready), .pm_data(pm_data),
         .keyboard(16'd0), .vclk(vclk), .vaddr(vaddr), .vdata(vdata),
-        .dbg_pc(), .dbg_a(), .dbg_d(), .dbg_instr(), .dbg_exec()
+        .dbg_pc(dbg_pc), .dbg_a(dbg_a), .dbg_d(dbg_d), .dbg_instr(dbg_instr), .dbg_exec(),
+        .dbg_we(dbg_we), .dbg_waddr(dbg_waddr), .dbg_wdata(dbg_wdata)
+    );
+
+    hack_stats stats (
+        .clk(clk), .clear(cpu_reset), .we(dbg_we), .addr(dbg_waddr), .wdata(dbg_wdata),
+        .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi)
     );
 
 endmodule

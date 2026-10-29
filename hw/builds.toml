@@ -65,6 +65,7 @@ sources = [
   "hw/rtl/cpu/hack_cpu.v",
   "hw/rtl/cpu/hack_alu.v",
   "hw/rtl/io/boot_loader.v",
+  "hw/rtl/debug/hack_stats.v",
   "hw/rtl/io/spi_flash_reader.v",
   "hw/rtl/mem/hack_memory.v",
   "hw/rtl/mem/ram16k.v",

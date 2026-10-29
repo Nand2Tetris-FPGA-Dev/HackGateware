@@ -20,7 +20,10 @@ module hack_computer (
     output wire [15:0] dbg_a,
     output wire [15:0] dbg_d,
     output reg  [15:0] dbg_instr,
-    output wire        dbg_exec
+    output wire        dbg_exec,
+    output wire        dbg_we,
+    output wire [14:0] dbg_waddr,
+    output wire [15:0] dbg_wdata
 );
 
     localparam REQ = 2'd0, WAIT = 2'd1, EXEC = 2'd2;
@@ -50,6 +53,9 @@ module hack_computer (
 
     assign pm_addr = pc;
     assign dbg_pc = pc;
+    assign dbg_we = write_m & exec;
+    assign dbg_waddr = address_m;
+    assign dbg_wdata = out_m;
 
     // A fetch already in flight when reset arrives is still waited out, so a
     // late pm_ready can't be taken for the next fetch. Its instruction is for
