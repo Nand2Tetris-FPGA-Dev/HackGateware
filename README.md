@@ -14,11 +14,10 @@ and showing the Hack screen over HDMI.
 
 - Book CPU, ALU and memory map: 32K word ROM, RAM at 0-16383, screen at
   16384-24575, keyboard at 24576.
-- Program memory is PSRAM, loaded at power-on from external flash with a CRC
-  check. If PSRAM doesn't work with the open tools we fall back to running
-  straight from flash.
+- Program memory is PSRAM, loaded at power-on from external flash slot 0
+  with a CRC check. A small buffer holds the last two instructions read.
 - HDMI output at 640x480, with the 512x256 Hack screen centered.
-- Verilog-2005, except the vendored PSRAM controller (SystemVerilog).
+- Verilog-2005. The PSRAM chip model used in tests is SystemVerilog.
 
 ## Layout
 
@@ -44,6 +43,20 @@ hacktools hw build spike_blinky
 hacktools hw load spike_blinky      # SRAM, lost on power-off
 hacktools hw install spike_blinky   # internal flash
 ```
+
+## Running a program
+
+Install the computer once, then write programs to the external flash:
+
+```bash
+hacktools hw build hdmi
+hacktools hw install hdmi
+hacktools prog flash sw/tests/screen_pattern.asm --slot 0
+```
+
+The board loads slot 0 at power-on. S1 restarts the program, S2 loads it
+from flash again. LEDs: 0 loading, 1 running, 2 no valid program in slot 0,
+3 CRC error, 4 PSRAM ready, 5 heartbeat.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and branch rules.
 
