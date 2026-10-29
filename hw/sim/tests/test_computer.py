@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from hacktools.assembler import assemble
 from hacktools.emulator import HackMachine
+from hacktools.vmtranslator import translate
 
 from simrun import run_computer
 
@@ -117,3 +118,44 @@ def test_short_reset_during_execute():
 def test_book_pong_asm():
     pong = Path(os.environ["N2T_PROJECTS"]) / "6" / "pong" / "Pong.asm"
     assert_matches(assemble(pong.read_text()), 200_000)
+
+
+# The book's projects/8/FunctionCalls/FibonacciElement, computing fib(10)
+FIB_VM = {
+    "Sys": """
+function Sys.init 0
+push constant 10
+call Main.fibonacci 1
+pop temp 0
+label END
+goto END
+""",
+    "Main": """
+function Main.fibonacci 0
+push argument 0
+push constant 2
+lt
+if-goto N_LT_2
+goto N_GE_2
+label N_LT_2
+push argument 0
+return
+label N_GE_2
+push argument 0
+push constant 2
+sub
+call Main.fibonacci 1
+push argument 0
+push constant 1
+sub
+call Main.fibonacci 1
+add
+return
+""",
+}
+
+
+def test_vm_fib_cosim():
+    # fib(10) finishes after ~30.1K instructions
+    sim = assert_matches(assemble(translate(FIB_VM)), 31_000)
+    assert sim.ram[5] == 55
