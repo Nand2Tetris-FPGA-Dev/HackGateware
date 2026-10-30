@@ -86,6 +86,27 @@ heap  2310
 Pins (from `hw/boards/tangnano9k/lcd.cst`): reset 47, clock 76, CS 48,
 RS 49, data 77.
 
+## Serial link
+
+The `hdmi` build talks to the PC over the board's USB cable: the BL702 on
+the board is also a USB serial port. It runs at 1.5 Mbaud, 8N1, on pins 18
+(rx) and 17 (tx) (`hw/boards/tangnano9k/uart.cst`).
+
+Each packet is a type byte, a payload and a CRC-8/SMBUS over both,
+COBS-encoded and ended by 0x00. `hw/sim/serial_frames.py` is the reference.
+
+| Type | Payload | Reply |
+|---|---|---|
+| 0x01 KEY | 1 byte, the Hack key code (0 = no key) | none |
+| 0x02 ECHO | 0-16 bytes | 0x82, same payload |
+| 0x03 STATUS | none | 0x83, 37 bytes |
+
+The STATUS reply is little-endian: boot state (1 byte), then 16-bit PC, IR,
+A, D, SP, SP max, heap, keyboard and program words, the 16-byte name, and a
+16-bit count of bad packets. A request that arrives while a reply is going
+out is dropped. If no good packet arrives for 0.5 s the keyboard goes back
+to 0, so a key can't stick when the PC side stops.
+
 ## Jack programs
 
 Jack programs are compiled with the nand2tetris JackCompiler (it needs Java) and
