@@ -1,0 +1,6 @@
+// UART to the BL702 USB bridge. From https://github.com/sipeed/TangNano-9K-example
+// at 61adac1, picotiny/project/picotiny.cst (ser_tx 17, ser_rx 18)
+IO_LOC "uart_tx" 17;
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+IO_LOC "uart_rx" 18;
+IO_PORT "uart_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
