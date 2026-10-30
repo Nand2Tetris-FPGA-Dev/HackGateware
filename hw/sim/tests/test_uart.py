@@ -9,6 +9,7 @@ HW = Path(__file__).resolve().parents[2]
 SOURCES = [HW / "sim/tb/tb_uart.v", HW / "rtl/io/uart_rx.v", HW / "rtl/io/uart_tx.v"]
 BYTES = [0x00, 0xFF, 0x55, 0xAA, 0x01, 0x80, 0x41, 0xD5]
 BIT_3M = 333333
+CLK_PS = 37037      # 27 MHz, as in tb_uart.v
 
 pytestmark = pytest.mark.requires_iverilog
 
@@ -36,9 +37,12 @@ def test_rx_bytes_at_3m(tmp_path):
     assert "ERR" not in lines
 
 
+# 18 is the hdmi build's rate (1.5 Mbaud).
+@pytest.mark.parametrize("clks", [9, 18])
 @pytest.mark.parametrize("ppm", [-20000, 20000])
-def test_rx_rate_mismatch(tmp_path, ppm):
-    lines = run_uart(tmp_path, good(BYTES), BIT_PS=round(BIT_3M * (1 + ppm / 1e6)))
+def test_rx_rate_mismatch(tmp_path, ppm, clks):
+    bit_ps = round(CLK_PS * clks * (1 + ppm / 1e6))
+    lines = run_uart(tmp_path, good(BYTES), clks=clks, BIT_PS=bit_ps)
     assert received(lines) == BYTES
     assert "ERR" not in lines
 
@@ -62,8 +66,9 @@ def test_rx_break_recovers(tmp_path):
     assert received(lines) == BYTES
 
 
-def test_tx_loopback(tmp_path):
-    lines = run_uart(tmp_path, LOOP=1)
+@pytest.mark.parametrize("clks", [9, 18])
+def test_tx_loopback(tmp_path, clks):
+    lines = run_uart(tmp_path, clks=clks, LOOP=1)
     assert received(lines, "LB") == list(range(256))
     assert "LBERR" not in lines
     assert "IDLE 1" in lines

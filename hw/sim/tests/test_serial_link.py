@@ -50,7 +50,7 @@ class Run:
         return decode_frames(bytes(b for b, _ in self.tx))
 
 
-def run(tmp_path, items, tail=5000, bad_max=None, flip=False):
+def run(tmp_path, items, tail=5000, bad_max=None, flip=False, clks=CLKS_PER_BIT):
     """items: bytes (sent back to back), ("idle", bits) or ("brk", bits)."""
     lines, last_index, idle, count = [], [], 0, 0
     for item in items:
@@ -71,7 +71,7 @@ def run(tmp_path, items, tail=5000, bad_max=None, flip=False):
     plusargs["TAIL"] = str(tail)
     if flip:
         plusargs["FLIP"] = "1"
-    defines = {"CLKS_PER_BIT": str(CLKS_PER_BIT), "WATCHDOG": str(WATCHDOG)}
+    defines = {"CLKS_PER_BIT": str(clks), "WATCHDOG": str(WATCHDOG)}
     if bad_max is not None:
         defines["BAD_MAX"] = str(bad_max)
     out = iverilog(SOURCES, "tb_serial_link", plusargs=plusargs, defines=defines,
@@ -104,6 +104,18 @@ def test_key_sets_register(tmp_path):
     assert [v for _, v in r.kbd] == [0x41, 0]
     assert r.kbd[0][0] <= r.ends[0] + 3
     assert r.kbd[1][0] <= r.ends[1] + 3
+
+
+def test_hdmi_build_rate(tmp_path):
+    # The other tests run at 9 clocks a bit to keep the sims short.
+    echo = encode_frame(0x02, bytes([0, 1, 2, 0]))
+    r = run(tmp_path, [key(0x41), STATUS_REQ, ("idle", REPLY_BITS), echo,
+                       ("idle", REPLY_BITS)], tail=10000, clks=18)
+    assert r.ends[0] >= len(key(0x41)) * 10 * 18
+    assert [v for _, v in r.kbd] == [0x41]
+    assert [t for t, _ in r.replies()] == [0x83, 0x82]
+    assert status_of(r)["keyboard"] == 0x41
+    assert r.replies()[1][1] == bytes([0, 1, 2, 0])
 
 
 def test_echo_reply(tmp_path):
@@ -158,6 +170,14 @@ def test_garbage_then_key(tmp_path):
     assert r.kbd[0][0] <= r.ends[-1] + 3
 
 
+def test_leading_zero(tmp_path):
+    # HackLink sends 0x00 before each frame; the empty frames it makes are not bad.
+    r = run(tmp_path, [b"\x00" + key(0x41), ("brk", 40), ("idle", 2),
+                       b"\x00" + STATUS_REQ, ("idle", REPLY_BITS)])
+    assert [v for _, v in r.kbd] == [0x41]
+    assert status_of(r)["bad_frames"] == 1    # the break
+
+
 def test_key_during_reply(tmp_path):
     r = run(tmp_path, [STATUS_REQ, key(0x41), ("idle", REPLY_BITS)])
     assert len(r.replies()) == 1
@@ -194,6 +214,16 @@ def test_watchdog_kept_alive(tmp_path):
     assert r.end - r.ends[0] >= 90000
     assert [v for _, v in r.kbd] == [0x41]
     assert all(s["keyboard"] == 0x41 for s in map(parse_status, (p for _, p in r.replies())))
+
+
+def test_bad_frames_do_not_feed_watchdog(tmp_path):
+    gap = 15000 // CLKS_PER_BIT
+    items = [key(0x41)]
+    for _ in range(40000 // 15000):
+        items += [("idle", gap), encode_frame(0x05), ("idle", gap), encode_frame(0x82, b"\x01")]
+    r = run(tmp_path, items, tail=WATCHDOG)
+    assert [v for _, v in r.kbd] == [0x41, 0]
+    assert abs(r.kbd[1][0] - r.ends[0] - WATCHDOG) <= 100
 
 
 def test_silent_without_requests(tmp_path):

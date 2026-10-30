@@ -3,8 +3,9 @@
 // Serial link to the PC. KEY (0x01) frames set the Hack keyboard register;
 // ECHO (0x02) and STATUS (0x03) get a 0x82 or 0x83 reply. One reply goes out at
 // a time and a request that comes in meanwhile is dropped, but KEY frames are
-// never held up by a reply. With no good frame for WATCHDOG_CYCLES the keyboard
-// goes back to 0, so a key can't stay down when the PC side dies.
+// never held up by a reply. With no KEY, ECHO or STATUS frame for
+// WATCHDOG_CYCLES the keyboard goes back to 0, so a key can't stay down when
+// the PC side dies. Bad frames don't count as the PC being alive.
 // Bad frames (crc, COBS, unknown type, wrong length) count up to BAD_MAX.
 module serial_link #(
     parameter CLKS_PER_BIT    = 18,          // 1.5 Mbaud at 27 MHz
@@ -108,14 +109,15 @@ module serial_link #(
     wire is_echo   = rd_data == ECHO && frame_len <= ECHO_MAX + 1;
     wire is_status = rd_data == STATUS && frame_len == 1;
     wire replying  = tx_start || tx_busy;
-    wire bad = frame_bad || (frame_ok && state == IDLE && !(is_key || is_echo || is_status));
+    wire accepted  = frame_ok && state == IDLE && (is_key || is_echo || is_status);
+    wire bad = frame_bad || (frame_ok && state == IDLE && !accepted);
     wire latch = state == IDLE && frame_ok && is_status && !replying;
 
     localparam QW = $clog2(WATCHDOG_CYCLES + 1);
-    reg [QW-1:0] quiet = 0;     // cycles since the last good frame
+    reg [QW-1:0] quiet = 0;     // cycles since the last accepted frame
 
     always @(posedge clk)
-        if (rst || frame_ok)
+        if (rst || accepted)
             quiet <= 0;
         else if (quiet != WATCHDOG_CYCLES)
             quiet <= quiet + 1'b1;
