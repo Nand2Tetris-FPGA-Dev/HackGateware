@@ -6,6 +6,8 @@
 // keyboard change and TX per reply byte, all with the cycle count.
 // Status inputs come from plusargs; +FLIP inverts them all right after each
 // snapshot (dut.latch), so a late read shows up. +TAIL: cycles to run after END.
+// A flash stub answers fl_req +FL_WAIT cycles later with +FL_STATUS and +FL_CRC
+// (hex), busy until then; prints FLREQ per request and PB per page buffer write.
 `ifndef CLKS_PER_BIT
 `define CLKS_PER_BIT 9
 `endif
@@ -30,14 +32,43 @@ module tb_serial_link;
     reg [127:0] prog_name = 0;
     wire tx;
     wire [15:0] keyboard;
+    wire fl_req, pb_we;
+    wire [2:0] fl_op;
+    wire [23:0] fl_addr, fl_len;
+    wire [7:0] pb_addr, pb_data;
+    reg fl_busy = 0, fl_rsp = 0;
+    reg [1:0] fl_status = 0;
+    reg [31:0] fl_crc = 0;
+    integer fl_wait, fl_left = 0;
 
     serial_link #(
         .CLKS_PER_BIT(CPB), .WATCHDOG_CYCLES(`WATCHDOG), .BAD_MAX(`BAD_MAX)
     ) dut (
         .clk(clk), .rst(rst), .uart_rx(rx), .uart_tx(tx), .keyboard(keyboard),
         .boot_state(boot_state), .pc(pc), .instr(instr), .a(a), .d(d), .sp(sp),
-        .sp_max(sp_max), .heap_hi(heap_hi), .prog_words(prog_words), .prog_name(prog_name)
+        .sp_max(sp_max), .heap_hi(heap_hi), .prog_words(prog_words), .prog_name(prog_name),
+        .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
+        .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
     );
+
+    always @(posedge clk) begin
+        fl_rsp <= 0;
+        if (pb_we) $display("PB %02x %02x %0d", pb_addr, pb_data, cycle);
+        if (fl_req) begin
+            $display("FLREQ %0d %06x %0d %0d", fl_op, fl_addr, fl_len, cycle);
+            if (fl_busy) $display("FLREQBUSY %0d", cycle);
+            fl_busy <= 1;
+            fl_left <= fl_wait;
+        end else if (fl_busy) begin
+            if (fl_left == 0) begin
+                fl_busy <= 0;
+                fl_rsp <= 1;
+            end else begin
+                fl_left <= fl_left - 1;
+            end
+        end
+    end
 
     wire [7:0] tx_byte;
     wire tx_valid, tx_err;
@@ -104,6 +135,9 @@ module tb_serial_link;
         if (!$value$plusargs("HEAP=%h", heap_hi)) heap_hi = 0;
         if (!$value$plusargs("WORDS=%h", prog_words)) prog_words = 0;
         if (!$value$plusargs("NAME=%h", prog_name)) prog_name = 0;
+        if (!$value$plusargs("FL_WAIT=%d", fl_wait)) fl_wait = 0;
+        if (!$value$plusargs("FL_STATUS=%h", fl_status)) fl_status = 0;
+        if (!$value$plusargs("FL_CRC=%h", fl_crc)) fl_crc = 0;
         repeat (4) @(negedge clk);
         rst = 0;
         repeat (4 * CPB) @(negedge clk);

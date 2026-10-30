@@ -3,23 +3,29 @@
 // flash_boot_system (spi_flash_model with flash.hex, psram_host_model) with
 // serial_link on its keyboard input, wired as in top_tangnano9k_hdmi.
 // Once the CPU runs, rx.txt is bit-banged into uart_rx as in tb_serial_link
-// ("<idle_bits> <hex byte>" per line); prints SENT per byte and END after the
-// last. +PRESS_AT=n holds S1 for 3 cycles from n cycles after END.
+// ("<idle_bits> <hex byte>" per line, or "<idle_bits> s2 <cycles>" to hold S2);
+// prints SENT per byte and END after the last. +PRESS_AT=n holds S1 for 3
+// cycles from n cycles after END.
 // Prints W per CPU RAM write, KBD on each keyboard change and TX per reply
 // byte, all with the cycle count, and "reset" when the CPU goes into reset.
 // trace.txt gets "pc instr a d" per instruction. +TAIL: cycles to run after
-// END; +STEPS=n stops after n instructions instead.
+// END; +STEPS=n stops after n instructions instead. At the end: ram.txt,
+// screen.txt and a RESULT line. FAIL if the loader starts a read in a flash
+// session or both flash masters have CS# low.
 `ifndef CLKS_PER_BIT
 `define CLKS_PER_BIT 9
 `endif
 `ifndef WATCHDOG
 `define WATCHDOG 100000
 `endif
+`ifndef SESSION_TIMEOUT
+`define SESSION_TIMEOUT 27_000_000
+`endif
 module tb_serial_system;
     localparam real HALF_NS = 500_000_000.0 / 27_000_000;
     localparam CPB = `CLKS_PER_BIT;
 
-    reg clk = 0, vclk = 0, por_n = 0, s1 = 0, rx = 1;
+    reg clk = 0, vclk = 0, por_n = 0, s1 = 0, s2 = 0, rx = 1;
     wire flash_clk, flash_cs_n, flash_mosi, flash_miso;
     wire req_valid, req_ready, req_we, rsp_valid, init_done;
     wire [23:0] req_addr;
@@ -31,9 +37,15 @@ module tb_serial_system;
     wire [127:0] prog_name;
     wire [15:0] prog_words, dbg_instr, dbg_a, dbg_d, sp, sp_max;
     wire [14:0] dbg_pc, heap_hi;
+    wire fl_req, pb_we, fl_busy, fl_rsp;
+    wire [2:0] fl_op;
+    wire [23:0] fl_addr, fl_len;
+    wire [7:0] pb_addr, pb_data;
+    wire [1:0] fl_status;
+    wire [31:0] fl_crc;
 
-    flash_boot_system dut (
-        .clk(clk), .por_n(por_n), .s1(s1), .s2(1'b0), .keyboard(keyboard),
+    flash_boot_system #(.SESSION_TIMEOUT_CYCLES(`SESSION_TIMEOUT)) dut (
+        .clk(clk), .por_n(por_n), .s1(s1), .s2(s2), .keyboard(keyboard),
         .flash_clk(flash_clk), .flash_cs_n(flash_cs_n),
         .flash_mosi(flash_mosi), .flash_miso(flash_miso),
         .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),
@@ -44,17 +56,19 @@ module tb_serial_system;
         .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),
         .dbg_pc(dbg_pc), .dbg_instr(dbg_instr), .dbg_a(dbg_a), .dbg_d(dbg_d),
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi),
-        // no flash requests here
-        .fl_req(1'b0), .fl_op(3'd0), .fl_addr(24'd0), .fl_len(24'd0),
-        .pb_we(1'b0), .pb_addr(8'd0), .pb_data(8'd0),
-        .fl_busy(), .fl_rsp(), .fl_status(), .fl_crc()
+        .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
+        .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
     );
 
     serial_link #(.CLKS_PER_BIT(CPB), .WATCHDOG_CYCLES(`WATCHDOG)) link (
         .clk(clk), .rst(~por_n), .uart_rx(rx), .uart_tx(tx), .keyboard(keyboard),
         .boot_state(boot_state), .pc(dbg_pc), .instr(dbg_instr), .a(dbg_a), .d(dbg_d),
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi), .prog_words(prog_words),
-        .prog_name(prog_name)
+        .prog_name(prog_name),
+        .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
+        .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
     );
 
     spi_flash_model #(.HEXFILE("flash.hex"), .SIZE(262144)) flash (
@@ -106,6 +120,13 @@ module tb_serial_system;
         end
     end
 
+    always @(posedge clk) begin
+        if (dut.session && dut.ld_rd_start)
+            $display("FAIL loader read in a session at %0d", cycle);
+        if (!dut.wr_cs_n && !dut.rd_cs_n)
+            $display("FAIL two flash masters at %0d", cycle);
+    end
+
     always @(negedge clk)
         if (por_n && keyboard !== kbd_seen) begin
             $display("KBD %0d %02x", cycle, keyboard);
@@ -126,8 +147,8 @@ module tb_serial_system;
         end
     endtask
 
-    integer fd, n, idle, b, tail, press_at;
-    reg [8*16-1:0] line;
+    integer fd, n, idle, b, tail, press_at, hold, i;
+    reg [8*16-1:0] line, word;
 
     initial begin
         if (!$value$plusargs("STEPS=%d", steps)) steps = -1;
@@ -140,10 +161,18 @@ module tb_serial_system;
         repeat (4 * CPB) @(negedge clk);
         fd = $fopen("rx.txt", "r");
         while ($fgets(line, fd)) begin
-            n = $sscanf(line, "%d %h", idle, b);
+            n = $sscanf(line, "%d %s %d", idle, word, hold);
             repeat (idle * CPB) @(negedge clk);
-            send_byte(b);
-            $display("SENT %0d", cycle);
+            if (word == "s2") begin
+                $display("S2 %0d session=%0d fl_busy=%0d", cycle, dut.session, fl_busy);
+                s2 = 1;
+                repeat (hold) @(negedge clk);
+                s2 = 0;
+            end else begin
+                n = $sscanf(line, "%d %h", idle, b);
+                send_byte(b);
+                $display("SENT %0d", cycle);
+            end
         end
         $display("END %0d", cycle);
         if (press_at >= 0) begin
@@ -154,6 +183,14 @@ module tb_serial_system;
             s1 = 0;
         end
         repeat (tail) @(negedge clk);
+        fd = $fopen("ram.txt", "w");
+        for (i = 0; i < 16384; i = i + 1) $fdisplay(fd, "%04x", dut.computer.u_mem.u_ram.mem[i]);
+        $fclose(fd);
+        fd = $fopen("screen.txt", "w");
+        for (i = 0; i < 8192; i = i + 1)
+            $fdisplay(fd, "%04x", dut.computer.u_mem.u_screen.mem[i]);
+        $fclose(fd);
+        $display("RESULT running=%0d boot_state=%0d", running, boot_state);
         $display("DONE");
         $finish;
     end

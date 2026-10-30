@@ -79,6 +79,12 @@ module top (
     wire [15:0] prog_words, dbg_instr, dbg_a, dbg_d, sp, sp_max;
     wire [14:0] dbg_pc, heap_hi;
     wire [15:0] keyboard;
+    wire fl_req, pb_we, fl_busy, fl_rsp;
+    wire [2:0] fl_op;
+    wire [23:0] fl_addr, fl_len;
+    wire [7:0] pb_addr, pb_data;
+    wire [1:0] fl_status;
+    wire [31:0] fl_crc;
 
     flash_boot_system system (
         .clk(clk), .por_n(~por), .s1(s1_pressed), .s2(s2_pressed), .keyboard(keyboard),
@@ -92,18 +98,20 @@ module top (
         .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),
         .dbg_pc(dbg_pc), .dbg_instr(dbg_instr), .dbg_a(dbg_a), .dbg_d(dbg_d),
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi),
-        // flash requests not wired yet
-        .fl_req(1'b0), .fl_op(3'd0), .fl_addr(24'd0), .fl_len(24'd0),
-        .pb_we(1'b0), .pb_addr(8'd0), .pb_data(8'd0),
-        .fl_busy(), .fl_rsp(), .fl_status(), .fl_crc()
+        .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
+        .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
     );
 
-    // Serial link: keyboard in, status out
+    // Serial link: keyboard in, status out, flash writes to the system
     serial_link link (
         .clk(clk), .rst(por), .uart_rx(uart_rx), .uart_tx(uart_tx), .keyboard(keyboard),
         .boot_state(boot_state), .pc(dbg_pc), .instr(dbg_instr), .a(dbg_a), .d(dbg_d),
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi), .prog_words(prog_words),
-        .prog_name(prog_name)
+        .prog_name(prog_name),
+        .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
+        .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
     );
 
     // Status LCD. The loader always reads slot 0.
