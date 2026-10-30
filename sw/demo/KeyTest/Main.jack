@@ -1,64 +1,117 @@
 // Shows the keyboard register: a 64x64 box at the top left is filled while a
 // key is held, and the text shows the key code, its character and how many
 // presses have been seen. A press is a change to a non-zero value.
+// The keyboard is read between every character drawn, so the box follows the
+// key at once and a short tap during a redraw still counts.
 class Main {
+    static int last, presses;
+    static boolean dirty;
+
     function void main() {
-        var int key, last, presses;
         let last = 0;
         let presses = 0;
+        let dirty = true;
         do Output.moveCursor(1, 10);
         do Output.printString("code");
         do Output.moveCursor(1, 22);
         do Output.printString("presses");
-        do Main.show(0, 0);
         while (true) {
-            let key = Keyboard.keyPressed();
-            if (~(key = last)) {
-                if (~(key = 0)) {
-                    let presses = presses + 1;
-                }
-                if ((key = 0) | (last = 0)) {
-                    do Main.box(~(key = 0));
-                }
-                do Main.show(key, presses);
-                let last = key;
+            do Main.poll();
+            if (dirty) {
+                let dirty = false;
+                do Main.show();
             }
         }
         return;
     }
 
+    // Reads the keyboard. On a change: counts a press, sets the box and marks
+    // the text for a redraw. Returns true on a change.
+    function boolean poll() {
+        var int key;
+        let key = Keyboard.keyPressed();
+        if (key = last) {
+            return false;
+        }
+        if (~(key = 0) & (presses < 32767)) {
+            let presses = presses + 1;
+        }
+        if ((key = 0) | (last = 0)) {
+            do Main.box(~(key = 0));
+        }
+        let last = key;
+        let dirty = true;
+        return true;
+    }
+
     // Screen words 0-3 of rows 0-63.
     function void box(boolean on) {
-        var int addr, value;
-        let addr = 16384;
+        var Array row;
+        var int value;
+        let row = 16384;
         let value = 0;
         if (on) {
             let value = -1;
         }
-        while (addr < 18432) {
-            do Memory.poke(addr, value);
-            do Memory.poke(addr + 1, value);
-            do Memory.poke(addr + 2, value);
-            do Memory.poke(addr + 3, value);
-            let addr = addr + 32;
+        while (row < 18432) {
+            let row[0] = value;
+            let row[1] = value;
+            let row[2] = value;
+            let row[3] = value;
+            let row = row + 32;
         }
         return;
     }
 
     // Only the fields are redrawn: each character costs the OS ~30k
-    // instructions. The code is padded so a shorter one leaves nothing behind.
-    function void show(int key, int presses) {
+    // instructions. Stops when the key changes; main starts it again.
+    function void show() {
+        var int c;
         do Output.moveCursor(1, 15);
-        do Output.printInt(key);
-        do Output.printString("  ");
+        if (Main.number(last, 5)) {
+            return;
+        }
+        let c = 32;
+        if ((last > 31) & (last < 127)) {
+            let c = last;
+        }
         do Output.moveCursor(1, 20);
-        if ((key > 31) & (key < 127)) {
-            do Output.printChar(key);
-        } else {
-            do Output.printChar(32);
+        if (Main.put(c)) {
+            return;
         }
         do Output.moveCursor(1, 30);
-        do Output.printInt(presses);
+        do Main.number(presses, 0);
         return;
+    }
+
+    // n (0-32767) left-aligned, padded with spaces to width. True if the key
+    // changed part way.
+    function boolean number(int n, int width) {
+        var int place, digit, used;
+        let place = 10000;
+        let used = 0;
+        while (place > 0) {
+            let digit = n / place;
+            if ((digit > 0) | (used > 0) | (place = 1)) {
+                if (Main.put(48 + digit)) {
+                    return true;
+                }
+                let used = used + 1;
+            }
+            let n = n - (digit * place);
+            let place = place / 10;
+        }
+        while (used < width) {
+            if (Main.put(32)) {
+                return true;
+            }
+            let used = used + 1;
+        }
+        return false;
+    }
+
+    function boolean put(char c) {
+        do Output.printChar(c);
+        return Main.poll();
     }
 }

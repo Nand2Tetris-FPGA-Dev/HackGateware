@@ -74,6 +74,11 @@ def test_math_demo():
     assert any(m.screen()[: 11 * 32]), "first text line is blank"
 
 
+# Worst case from a key change to the box redrawn: one OS character (~30k)
+# plus the box itself. Measured 51k.
+KEY_TEST_BOX_STEPS = 60_000
+
+
 def box(m: HackMachine) -> list[int]:
     return [m.screen()[r * 32 + w] for r in range(64) for w in range(4)]
 
@@ -134,3 +139,19 @@ def test_key_test():
     assert text_cells(m, count) not in (idle_count, count_1)
     m.run(500_000)  # 66 still held
     assert text_area(m) == pressed_b, "holding a key counted as another press"
+
+    # The keyboard is read between characters, so the box follows a change made
+    # part way through a redraw, and taps shorter than a redraw still count.
+    m.run(500_000, keyboard=[(0, 0)])
+    m.run(KEY_TEST_BOX_STEPS, keyboard=[(0, 67)])
+    assert box(m) == [0xFFFF] * 256
+    m.run(KEY_TEST_BOX_STEPS, keyboard=[(0, 0)])
+    assert box(m) == [0] * 256, "box waited for the redraw"
+    m.run(1_000_000, keyboard=[(0, 68), (40_000, 0), (80_000, 69), (120_000, 0)])
+    assert box(m) == [0] * 256
+    # Six presses so far (A, B, C, D, E, then '6'): the count shows the same
+    # glyph as the character field.
+    m.run(1_000_000, keyboard=[(0, ord("6"))])
+    assert any(text_cells(m, char))
+    assert text_cells(m, range(30, 31)) == text_cells(m, char), "a tap was lost"
+    assert not any(text_cells(m, range(31, 35)))
