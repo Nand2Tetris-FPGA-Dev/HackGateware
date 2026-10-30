@@ -26,7 +26,7 @@ module tb_debug_system;
     wire [14:0] dbg_pc, heap_hi;
 
     flash_boot_system dut (
-        .clk(clk), .por_n(por_n), .s1(s1), .s2(1'b0),
+        .clk(clk), .por_n(por_n), .s1(s1), .s2(1'b0), .keyboard(16'd0),
         .flash_clk(flash_clk), .flash_cs_n(flash_cs_n),
         .flash_mosi(flash_mosi), .flash_miso(flash_miso),
         .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),

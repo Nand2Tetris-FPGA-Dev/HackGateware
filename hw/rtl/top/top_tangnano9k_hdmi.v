@@ -2,7 +2,8 @@
 
 // Hack computer with its program loaded from flash slot 0 into PSRAM, Hack
 // screen on HDMI, status text on the 1.14" LCD. S1 resets the CPU, S2 loads
-// the program again.
+// the program again. The PC's keys and status requests come in over the
+// BL702 UART (serial_link).
 // LEDs: 0 = loader busy, 1 = running, 2 = bad header, 3 = bad CRC,
 // 4 = PSRAM ready, 5 = 1 Hz heartbeat.
 module top (
@@ -28,7 +29,9 @@ module top (
     output wire        lcd_clk,
     output wire        lcd_cs,
     output wire        lcd_rs,
-    output wire        lcd_data
+    output wire        lcd_data,
+    input  wire        uart_rx,
+    output wire        uart_tx
 );
 
     // Power-on reset: about 2.4 ms at 27 MHz
@@ -75,9 +78,10 @@ module top (
     wire [127:0] prog_name;
     wire [15:0] prog_words, dbg_instr, dbg_a, dbg_d, sp, sp_max;
     wire [14:0] dbg_pc, heap_hi;
+    wire [15:0] keyboard;
 
     flash_boot_system system (
-        .clk(clk), .por_n(~por), .s1(s1_pressed), .s2(s2_pressed),
+        .clk(clk), .por_n(~por), .s1(s1_pressed), .s2(s2_pressed), .keyboard(keyboard),
         .flash_clk(flash_clk), .flash_cs_n(flash_cs_n),
         .flash_mosi(flash_mosi), .flash_miso(flash_miso),
         .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),
@@ -88,6 +92,14 @@ module top (
         .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),
         .dbg_pc(dbg_pc), .dbg_instr(dbg_instr), .dbg_a(dbg_a), .dbg_d(dbg_d),
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi)
+    );
+
+    // Serial link: keyboard in, status out
+    serial_link link (
+        .clk(clk), .rst(por), .uart_rx(uart_rx), .uart_tx(uart_tx), .keyboard(keyboard),
+        .boot_state(boot_state), .pc(dbg_pc), .instr(dbg_instr), .a(dbg_a), .d(dbg_d),
+        .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi), .prog_words(prog_words),
+        .prog_name(prog_name)
     );
 
     // Status LCD. The loader always reads slot 0.

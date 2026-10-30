@@ -69,6 +69,11 @@ sources = [
   "hw/rtl/debug/debug_screen.v",
   "hw/rtl/debug/st7789_driver.v",
   "hw/rtl/io/spi_flash_reader.v",
+  "hw/rtl/io/uart_rx.v",
+  "hw/rtl/io/uart_tx.v",
+  "hw/rtl/io/frame_rx.v",
+  "hw/rtl/io/frame_tx.v",
+  "hw/rtl/io/serial_link.v",
   "hw/rtl/mem/hack_memory.v",
   "hw/rtl/mem/ram16k.v",
   "hw/rtl/mem/screen_mem.v",
@@ -86,6 +91,7 @@ cst = [
   "hw/boards/tangnano9k/psram.cst",
   "hw/boards/tangnano9k/flash.cst",
   "hw/boards/tangnano9k/lcd.cst",
+  "hw/boards/tangnano9k/uart.cst",
 ]
 pack_flags = ["--mspi_as_gpio"]
 

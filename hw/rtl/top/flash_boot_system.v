@@ -13,6 +13,7 @@ module flash_boot_system (
     input  wire        por_n,
     input  wire        s1,
     input  wire        s2,
+    input  wire [15:0] keyboard,
     output wire        flash_clk,
     output wire        flash_cs_n,
     output wire        flash_mosi,
@@ -102,7 +103,7 @@ module flash_boot_system (
     hack_computer computer (
         .clk(clk), .reset(cpu_reset),
         .pm_req(pm_req), .pm_addr(pm_addr), .pm_ready(pm_ready), .pm_data(pm_data),
-        .keyboard(16'd0), .vclk(vclk), .vaddr(vaddr), .vdata(vdata),
+        .keyboard(keyboard), .vclk(vclk), .vaddr(vaddr), .vdata(vdata),
         .dbg_pc(dbg_pc), .dbg_a(dbg_a), .dbg_d(dbg_d), .dbg_instr(dbg_instr), .dbg_exec(),
         .dbg_we(dbg_we), .dbg_waddr(dbg_waddr), .dbg_wdata(dbg_wdata)
     );
