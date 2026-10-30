@@ -42,7 +42,7 @@ module top (
     wire [15:0] vdata;
 
     hack_computer computer (
-        .clk(clk), .reset(cpu_reset),
+        .clk(clk), .reset(cpu_reset), .clear(1'b0), .clearing(),
         .pm_req(pm_req), .pm_addr(pm_addr), .pm_ready(pm_ready), .pm_data(pm_data),
         .keyboard(16'd0), .vclk(clk_pix), .vaddr(vaddr), .vdata(vdata),
         .dbg_pc(), .dbg_a(), .dbg_d(), .dbg_instr(), .dbg_exec()

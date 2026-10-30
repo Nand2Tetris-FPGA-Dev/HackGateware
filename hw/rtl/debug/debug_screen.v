@@ -148,6 +148,7 @@ module debug_screen (
             3'd3: state_name = "RESET ";
             3'd4: state_name = "NO IMG";
             3'd5: state_name = "BADCRC";
+            3'd6: state_name = "WRITE ";
             default: state_name = "      ";
         endcase
     endfunction

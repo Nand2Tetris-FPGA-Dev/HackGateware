@@ -6,15 +6,18 @@
 
 // Runs a program from rom.hex for +STEPS instructions. Writes one trace line
 // per instruction (pc before, A after, D after) and dumps RAM and screen.
+// +CLEAR pulses clear after the last instruction (reset stays low) and prints
+// "CLEARED n" with the cycles until clearing drops.
 module tb_computer;
-    reg clk = 0, vclk = 0, reset = 1;
+    reg clk = 0, vclk = 0, reset = 1, clear = 0;
+    wire clearing;
     reg [15:0] keyboard = 0;
     wire pm_req, pm_ready, dbg_exec;
     wire [14:0] pm_addr, dbg_pc;
     wire [15:0] pm_data, vdata, dbg_a, dbg_d, dbg_instr;
 
     hack_computer dut (
-        .clk(clk), .reset(reset),
+        .clk(clk), .reset(reset), .clear(clear), .clearing(clearing),
         .pm_req(pm_req), .pm_addr(pm_addr), .pm_ready(pm_ready), .pm_data(pm_data),
         .keyboard(keyboard), .vclk(vclk), .vaddr(13'd0), .vdata(vdata),
         .dbg_pc(dbg_pc), .dbg_a(dbg_a), .dbg_d(dbg_d), .dbg_instr(dbg_instr),
@@ -139,9 +142,28 @@ module tb_computer;
                 repeat (reset_len) @(posedge clk);
                 #1 reset = 0;
             end
-            if (executed == steps) finish_run;
+            if (executed == steps) begin
+                if ($test$plusargs("CLEAR")) clear_run;
+                else finish_run;
+            end
         end
     end
+
+    task clear_run;
+        integer n;
+        begin
+            @(negedge clk) clear = 1;
+            @(negedge clk) clear = 0;
+            n = 1;
+            while (clearing) begin
+                if (dbg_exec || pm_req) $display("FAIL CPU active while clearing");
+                @(negedge clk);
+                n = n + 1;
+            end
+            $display("CLEARED %0d", n);
+            finish_run;
+        end
+    endtask
 
     task finish_run;
         begin

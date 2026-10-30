@@ -36,7 +36,11 @@ module tb_debug_system;
         .busy(busy), .running(running), .err_header(err_header), .err_crc(err_crc),
         .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),
         .dbg_pc(dbg_pc), .dbg_instr(dbg_instr), .dbg_a(dbg_a), .dbg_d(dbg_d),
-        .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi)
+        .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi),
+        // no flash requests here
+        .fl_req(1'b0), .fl_op(3'd0), .fl_addr(24'd0), .fl_len(24'd0),
+        .pb_we(1'b0), .pb_addr(8'd0), .pb_data(8'd0),
+        .fl_busy(), .fl_rsp(), .fl_status(), .fl_crc()
     );
 
     spi_flash_model #(.HEXFILE("flash.hex"), .SIZE(262144)) flash (

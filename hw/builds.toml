@@ -69,6 +69,8 @@ sources = [
   "hw/rtl/debug/debug_screen.v",
   "hw/rtl/debug/st7789_driver.v",
   "hw/rtl/io/spi_flash_reader.v",
+  "hw/rtl/io/spi_flash_writer.v",
+  "hw/rtl/io/flash_session.v",
   "hw/rtl/io/uart_rx.v",
   "hw/rtl/io/uart_tx.v",
   "hw/rtl/io/frame_rx.v",

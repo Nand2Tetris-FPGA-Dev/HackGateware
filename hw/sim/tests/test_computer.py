@@ -159,3 +159,30 @@ def test_vm_fib_cosim():
     # fib(10) finishes after ~30.1K instructions
     sim = assert_matches(assemble(translate(FIB_VM)), 31_000)
     assert sim.ram[5] == 55
+
+
+CLEAR_ROM = """
+@5
+M=-1
+@16383
+M=-1
+@SCREEN
+M=-1
+@24575
+M=-1
+(END)
+@END
+0;JMP
+"""
+
+
+def test_clear_zeroes_ram_and_screen():
+    rom = assemble(CLEAR_ROM)
+    ram_init = {0: 7, 100: 8, 9999: 9}
+    kept = run_computer(rom, 8, ram_init=ram_init, trace=False)
+    assert [kept.ram[a] for a in (0, 5, 100, 9999, 16383)] == [7, 0xFFFF, 8, 9, 0xFFFF]
+    assert kept.screen[0] == kept.screen[8191] == 0xFFFF
+    sim = run_computer(rom, 8, ram_init=ram_init, trace=False, clear=True)
+    assert not any(sim.ram) and not any(sim.screen)
+    # one write per cycle, 24576 words
+    assert 24576 <= sim.clear_cycles <= 24580

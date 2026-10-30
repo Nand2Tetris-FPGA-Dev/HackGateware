@@ -16,6 +16,8 @@ SOURCES = [
     HW / "sim/models/spi_flash_model.v",
     HW / "sim/models/psram_host_model.v",
     HW / "rtl/io/spi_flash_reader.v",
+    HW / "rtl/io/spi_flash_writer.v",
+    HW / "rtl/io/flash_session.v",
     HW / "rtl/io/boot_loader.v",
     HW / "rtl/io/serial_link.v",
     HW / "rtl/io/uart_rx.v",

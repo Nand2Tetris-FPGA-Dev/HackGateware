@@ -104,3 +104,12 @@ def test_snapshot_is_coherent(tmp_path):
 def test_bottom_rows_black(pong_run):
     frame = read_frame(pong_run / "frame1.hex")
     assert all(p == 0 for row in frame[128:] for p in row)
+
+
+@pytest.mark.requires_iverilog
+def test_write_state_name(tmp_path):
+    values = PONG | {"state": 6}
+    _run(tmp_path, values)
+    lines = _text(tmp_path)
+    assert lines[0].endswith("WRITE ") and lines[1].strip() == ""
+    assert lines == status_lines(**values)
