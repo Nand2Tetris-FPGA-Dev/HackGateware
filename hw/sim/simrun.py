@@ -18,9 +18,11 @@ def iverilog(
 ) -> str:
     with tempfile.TemporaryDirectory() as tmp:
         vvp_file = Path(tmp) / f"{top}.vvp"
-        compile_argv = ["iverilog", "-g2012", "-s", top, "-o", str(vvp_file)]
+        # -grelative-include: `include finds files next to the source, as yosys does.
+        # It needs forward slashes in the source paths on Windows.
+        compile_argv = ["iverilog", "-g2012", "-grelative-include", "-s", top, "-o", str(vvp_file)]
         compile_argv += [f"-D{k}={v}" for k, v in (defines or {}).items()]
-        compile_argv += [str(s) for s in sources]
+        compile_argv += [Path(s).as_posix() for s in sources]
         c = subprocess.run(compile_argv, capture_output=True, text=True, cwd=cwd)
         if c.returncode != 0:
             raise SimError(f"iverilog failed:\n{c.stderr}")
