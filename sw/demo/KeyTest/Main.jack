@@ -1,0 +1,64 @@
+// Shows the keyboard register: a 64x64 box at the top left is filled while a
+// key is held, and the text shows the key code, its character and how many
+// presses have been seen. A press is a change to a non-zero value.
+class Main {
+    function void main() {
+        var int key, last, presses;
+        let last = 0;
+        let presses = 0;
+        do Output.moveCursor(1, 10);
+        do Output.printString("code");
+        do Output.moveCursor(1, 22);
+        do Output.printString("presses");
+        do Main.show(0, 0);
+        while (true) {
+            let key = Keyboard.keyPressed();
+            if (~(key = last)) {
+                if (~(key = 0)) {
+                    let presses = presses + 1;
+                }
+                if ((key = 0) | (last = 0)) {
+                    do Main.box(~(key = 0));
+                }
+                do Main.show(key, presses);
+                let last = key;
+            }
+        }
+        return;
+    }
+
+    // Screen words 0-3 of rows 0-63.
+    function void box(boolean on) {
+        var int addr, value;
+        let addr = 16384;
+        let value = 0;
+        if (on) {
+            let value = -1;
+        }
+        while (addr < 18432) {
+            do Memory.poke(addr, value);
+            do Memory.poke(addr + 1, value);
+            do Memory.poke(addr + 2, value);
+            do Memory.poke(addr + 3, value);
+            let addr = addr + 32;
+        }
+        return;
+    }
+
+    // Only the fields are redrawn: each character costs the OS ~30k
+    // instructions. The code is padded so a shorter one leaves nothing behind.
+    function void show(int key, int presses) {
+        do Output.moveCursor(1, 15);
+        do Output.printInt(key);
+        do Output.printString("  ");
+        do Output.moveCursor(1, 20);
+        if ((key > 31) & (key < 127)) {
+            do Output.printChar(key);
+        } else {
+            do Output.printChar(32);
+        }
+        do Output.moveCursor(1, 30);
+        do Output.printInt(presses);
+        return;
+    }
+}
