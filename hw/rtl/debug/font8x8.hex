@@ -1,4 +1,5 @@
-// font8x8_basic.h, github.com/dhepper/font8x8 commit 8e279d2, public domain. Glyph c row r at c*8+r, bit 0 leftmost.
+// font8x8_basic.h, github.com/dhepper/font8x8 commit 8e279d2, public domain.
+// Glyph c row r at c*8+r, bit 0 leftmost.
 00
 00
 00

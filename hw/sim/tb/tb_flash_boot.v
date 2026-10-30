@@ -170,9 +170,11 @@ module tb_flash_boot;
             fd = $fopen("screen.txt", "w");
             for (i = 0; i < 8192; i = i + 1) $fdisplay(fd, "%04x", dut.computer.u_mem.u_screen.mem[i]);
             $fclose(fd);
-            $display("RESULT running=%0d busy=%0d err_header=%0d err_crc=%0d executed=%0d fetches=%0d loads=%0d errors=%0d model_errors=%0d words=%0d name=%0d sp=%0d sp_max=%0d heap_hi=%0d",
-                     running, busy, err_header, err_crc, executed, fetches, loads, errors,
-                     `MODEL_ERRORS, prog_words, prog_name, sp, sp_max, heap_hi);
+            $display("RESULT running=%0d busy=%0d err_header=%0d err_crc=%0d executed=%0d ",
+                     running, busy, err_header, err_crc, executed,
+                     "fetches=%0d loads=%0d errors=%0d model_errors=%0d words=%0d ",
+                     fetches, loads, errors, `MODEL_ERRORS, prog_words,
+                     "name=%0d sp=%0d sp_max=%0d heap_hi=%0d", prog_name, sp, sp_max, heap_hi);
             $finish;
         end
     endtask

@@ -128,8 +128,9 @@ module tb_boot_loader;
             errors = errors + 1;
         end
         $writememh("captured.hex", mem);
-        $display("RESULT done=%0d err_header=%0d err_crc=%0d busy=%0d count=%0d writes=%0d last_strb=%b name=%032x errors=%0d",
-                 done, err_header, err_crc, busy, word_count, writes, last_strb, name, errors);
+        $display("RESULT done=%0d err_header=%0d err_crc=%0d busy=%0d count=%0d writes=%0d ",
+                 done, err_header, err_crc, busy, word_count, writes,
+                 "last_strb=%b name=%032x errors=%0d", last_strb, name, errors);
         $finish;
     end
 endmodule

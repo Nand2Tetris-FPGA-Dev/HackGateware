@@ -21,12 +21,17 @@ CLEAR = (1, 0, 0, 0)
 
 
 def run_stats(tmp_path, cycles):
-    """cycles: (clear, we, addr, wdata) per cycle. Returns (sp, sp_max, heap_hi) after each."""
-    (tmp_path / "stim.txt").write_text("".join(f"{c:x} {w:x} {a:x} {d:x}\n" for c, w, a, d in cycles))
+    """cycles: (clear, we, addr, wdata) per cycle.
+
+    Returns (sp, sp_max, heap_hi) after each.
+    """
+    stim = "".join(f"{c:x} {w:x} {a:x} {d:x}\n" for c, w, a, d in cycles)
+    (tmp_path / "stim.txt").write_text(stim)
     out = iverilog([HW / "sim/tb/tb_hack_stats.v", HW / "rtl/debug/hack_stats.v"],
                    "tb_hack_stats", cwd=tmp_path)
     assert "DONE" in out, out
-    return [tuple(int(v) for v in line.split()) for line in (tmp_path / "out.txt").read_text().splitlines()]
+    lines = (tmp_path / "out.txt").read_text().splitlines()
+    return [tuple(int(v) for v in line.split()) for line in lines]
 
 
 def test_stats_sp_and_max(tmp_path):
@@ -47,7 +52,9 @@ def test_stats_heap_range(tmp_path):
 
 
 def test_stats_ignore_reads(tmp_path):
-    out = run_stats(tmp_path, [CLEAR, write(0, 300), write(2500, 1), read(0), read(5000), read(0, 999)])
+    out = run_stats(
+        tmp_path, [CLEAR, write(0, 300), write(2500, 1), read(0), read(5000), read(0, 999)]
+    )
     assert out[2:] == [(300, 300, 2500)] * 4
 
 
