@@ -66,6 +66,8 @@ sources = [
   "hw/rtl/cpu/hack_alu.v",
   "hw/rtl/io/boot_loader.v",
   "hw/rtl/debug/hack_stats.v",
+  "hw/rtl/debug/debug_screen.v",
+  "hw/rtl/debug/st7789_driver.v",
   "hw/rtl/io/spi_flash_reader.v",
   "hw/rtl/mem/hack_memory.v",
   "hw/rtl/mem/ram16k.v",
@@ -83,6 +85,7 @@ cst = [
   "hw/boards/tangnano9k/hdmi.cst",
   "hw/boards/tangnano9k/psram.cst",
   "hw/boards/tangnano9k/flash.cst",
+  "hw/boards/tangnano9k/lcd.cst",
 ]
 pack_flags = ["--mspi_as_gpio"]
 

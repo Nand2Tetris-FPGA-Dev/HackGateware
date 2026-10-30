@@ -16,7 +16,7 @@ module hack_computer (
     input  wire        vclk,
     input  wire [12:0] vaddr,
     output wire [15:0] vdata,
-    output wire [14:0] dbg_pc,
+    output reg  [14:0] dbg_pc,     // address of dbg_instr
     output wire [15:0] dbg_a,
     output wire [15:0] dbg_d,
     output reg  [15:0] dbg_instr,
@@ -29,7 +29,10 @@ module hack_computer (
     localparam REQ = 2'd0, WAIT = 2'd1, EXEC = 2'd2;
 
     reg [1:0] state = REQ;
-    initial dbg_instr = 16'd0;
+    initial begin
+        dbg_instr = 16'd0;
+        dbg_pc = 15'd0;
+    end
 
     wire exec = (state == EXEC) & ~reset;
     assign dbg_exec = exec;
@@ -52,7 +55,6 @@ module hack_computer (
     );
 
     assign pm_addr = pc;
-    assign dbg_pc = pc;
     assign dbg_we = write_m & exec;
     assign dbg_waddr = address_m;
     assign dbg_wdata = out_m;
@@ -67,6 +69,7 @@ module hack_computer (
             REQ:  if (!reset) state <= WAIT;
             WAIT: if (pm_ready) begin
                       dbg_instr <= pm_data;
+                      dbg_pc <= pc;
                       state <= (reset | drop) ? REQ : EXEC;
                       drop <= 1'b0;
                   end else if (reset) begin
