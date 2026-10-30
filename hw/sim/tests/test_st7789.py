@@ -23,7 +23,8 @@ INIT = ["C11"] + (
 
 
 def _run(cwd, **plusargs):
-    return iverilog(SOURCES, "tb_st7789", plusargs={k: str(v) for k, v in plusargs.items()}, cwd=cwd)
+    args = {k: str(v) for k, v in plusargs.items()}
+    return iverilog(SOURCES, "tb_st7789", plusargs=args, cwd=cwd)
 
 
 def _times(out):
@@ -52,6 +53,15 @@ def test_reset_and_sleep_timing(two_frames):
     assert t["resetn"] - t["rst"] >= 50
     assert t["c11_first"] - t["resetn"] >= 70
     assert t["c36_first"] - t["c11_last"] >= 90
+
+
+@pytest.mark.requires_iverilog
+def test_rst_again_restarts_init(tmp_path):
+    out = _run(tmp_path, RERESET=1)
+    log = (tmp_path / "lcd_log.txt").read_text().split()
+    second = [i for i, b in enumerate(log) if b == "C11"][1]
+    assert log[second:second + len(INIT) + 1] == INIT + ["C2C"]
+    assert not re.search(r"^ERROR ", out, re.M), out
 
 
 @pytest.mark.requires_iverilog

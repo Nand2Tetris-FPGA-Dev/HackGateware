@@ -183,6 +183,7 @@ module st7789_driver #(
             sck <= 1'b0;
             cs <= 1'b1;
             bits_left <= 0;
+            init_idx <= 0;
             frame_start <= 1'b0;
             req_pipe <= 0;
         end else begin

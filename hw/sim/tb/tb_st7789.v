@@ -5,6 +5,7 @@
 // driver sampling on the wrong cycle draws the wrong colors.
 // +FRAMES=n: stop after n frames; 0 stops at the first RAMWR.
 // +READY_DELAY=n: hold frame_ready low n cycles after each frame_start.
+// +RERESET=1: then pulse rst with CS high and run until the next RAMWR is logged.
 // Prints TIMES (cycle numbers of rst release, resetn rise, the first and last
 // SCL rise of SLPOUT, the first SCL rise of the next byte), READY_WAIT
 // (cycles from the first frame_start to the first SCL rise of RAMWR) and
@@ -16,7 +17,7 @@ module tb_st7789;
     wire lcd_resetn, lcd_clk, lcd_cs, lcd_rs, lcd_data;
     reg [16:0] d1 = 0, d2 = 0, d3 = 0, d4 = 0;
     wire [15:0] pixel = d4[16] ? d4[15:0] : 16'hDEAD;
-    integer frames, ready_delay, ready_cnt = 0, edges = 0;
+    integer frames, ready_delay, rereset, ready_cnt = 0, edges = 0;
     real t_rst, t_resetn, t_c11_first, t_c11_last, t_c36_first, t_fs = -1;
     event ramwr_seen;
 
@@ -75,12 +76,22 @@ module tb_st7789;
     initial begin
         if (!$value$plusargs("FRAMES=%d", frames)) frames = 1;
         if (!$value$plusargs("READY_DELAY=%d", ready_delay)) ready_delay = 0;
+        if (!$value$plusargs("RERESET=%d", rereset)) rereset = 0;
         repeat (3) @(negedge clk);
         rst = 0;
         @(posedge clk);
         t_rst = $realtime;
         if (frames == 0) @(ramwr_seen);
         else wait (lcd.frames_done == frames);
+        if (rereset) begin
+            wait (lcd_cs);
+            @(negedge clk) rst = 1;
+            repeat (3) @(negedge clk);
+            rst = 0;
+            edges = 0;
+            @(ramwr_seen);
+            wait (lcd.writing);
+        end
         $display("TIMES rst=%0d resetn=%0d c11_first=%0d c11_last=%0d c36_first=%0d",
                  cyc(t_rst), cyc(t_resetn), cyc(t_c11_first), cyc(t_c11_last), cyc(t_c36_first));
         $display("ERRORS %0d", lcd.errors);
