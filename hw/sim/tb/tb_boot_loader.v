@@ -19,6 +19,7 @@ module tb_boot_loader;
     wire [3:0] load_strb;
     wire busy, done, err_header, err_crc;
     wire [15:0] word_count;
+    wire [127:0] name;
     wire cs_n, sck, mosi, miso;
 
     reg [15:0] mem [0:32767];
@@ -33,7 +34,7 @@ module tb_boot_loader;
         .load_valid(load_valid), .load_ready(load_ready), .load_addr(load_addr),
         .load_data(load_data), .load_strb(load_strb),
         .busy(busy), .done(done), .err_header(err_header), .err_crc(err_crc),
-        .word_count(word_count)
+        .word_count(word_count), .name(name)
     );
 
     spi_flash_reader #(.HALF_PERIOD(2)) reader (
@@ -127,8 +128,9 @@ module tb_boot_loader;
             errors = errors + 1;
         end
         $writememh("captured.hex", mem);
-        $display("RESULT done=%0d err_header=%0d err_crc=%0d busy=%0d count=%0d writes=%0d last_strb=%b errors=%0d",
-                 done, err_header, err_crc, busy, word_count, writes, last_strb, errors);
+        $display("RESULT done=%0d err_header=%0d err_crc=%0d busy=%0d count=%0d writes=%0d ",
+                 done, err_header, err_crc, busy, word_count, writes,
+                 "last_strb=%b name=%032x errors=%0d", last_strb, name, errors);
         $finish;
     end
 endmodule

@@ -1,0 +1,13 @@
+// 1.14" ST7789V panel on the 8-pin LCD connector. From
+// https://github.com/sipeed/TangNano-9K-example at 61adac1
+// (spi_lcd/src/lcd114_test.cst)
+IO_LOC "lcd_resetn" 47;
+IO_PORT "lcd_resetn" PULL_MODE=UP DRIVE=8;
+IO_LOC "lcd_clk" 76;
+IO_PORT "lcd_clk" PULL_MODE=UP DRIVE=8;
+IO_LOC "lcd_cs" 48;
+IO_PORT "lcd_cs" PULL_MODE=UP DRIVE=8;
+IO_LOC "lcd_rs" 49;
+IO_PORT "lcd_rs" PULL_MODE=UP DRIVE=8;
+IO_LOC "lcd_data" 77;
+IO_PORT "lcd_data" PULL_MODE=UP DRIVE=8;

@@ -9,7 +9,8 @@
 // WAIT_FOR=3 in the next cycle with no PSRAM request out. For S2, flash2.hex
 // replaces the flash contents first.
 // trace.txt gets "pc instr a d" per instruction and "reset" each time the
-// CPU goes into reset. Prints a RESULT line.
+// CPU goes into reset. Prints "STATE n" when boot_state changes and a
+// RESULT line (name in decimal).
 module tb_flash_boot;
     localparam real HALF_NS = 500_000_000.0 / 27_000_000;
 
@@ -21,6 +22,10 @@ module tb_flash_boot;
     wire [3:0] req_wstrb;
     wire [15:0] vdata;
     wire busy, running, err_header, err_crc;
+    wire [2:0] boot_state;
+    wire [127:0] prog_name;
+    wire [15:0] prog_words, dbg_instr, dbg_a, dbg_d, sp, sp_max;
+    wire [14:0] dbg_pc, heap_hi;
 
     flash_boot_system dut (
         .clk(clk), .por_n(por_n), .s1(s1), .s2(s2),
@@ -30,7 +35,10 @@ module tb_flash_boot;
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
         .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done),
         .vclk(vclk), .vaddr(13'd0), .vdata(vdata),
-        .busy(busy), .running(running), .err_header(err_header), .err_crc(err_crc)
+        .busy(busy), .running(running), .err_header(err_header), .err_crc(err_crc),
+        .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),
+        .dbg_pc(dbg_pc), .dbg_instr(dbg_instr), .dbg_a(dbg_a), .dbg_d(dbg_d),
+        .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi)
     );
 
     spi_flash_model #(.HEXFILE("flash.hex"), .SIZE(262144)) flash (
@@ -71,6 +79,7 @@ module tb_flash_boot;
     integer executed = 0, cycles = 0, fetches = 0, loads = 0, errors = 0, err_at = -1;
     integer trace_fd, fd, i;
     reg was_reset = 1, pressed = 0;
+    reg [2:0] last_state = 3'bx;
     reg [14:0] pc_before;
     reg [15:0] instr;
 
@@ -96,12 +105,16 @@ module tb_flash_boot;
             $display("TIMEOUT after %0d instructions", executed);
             $finish;
         end
+        // psram_ctrl's state is x until por_n has reset it
+        if (por_n && boot_state !== last_state) begin
+            $display("STATE %0d", boot_state);
+            last_state = boot_state;
+        end
         if (dut.computer.dbg_exec) begin
-            pc_before = dut.computer.dbg_pc;
-            instr = dut.computer.dbg_instr;
+            pc_before = dbg_pc;
+            instr = dbg_instr;
             #1;
-            $fdisplay(trace_fd, "%04x %04x %04x %04x", pc_before, instr,
-                      dut.computer.dbg_a, dut.computer.dbg_d);
+            $fdisplay(trace_fd, "%04x %04x %04x %04x", pc_before, instr, dbg_a, dbg_d);
             executed = executed + 1;
             if (executed == steps) finish_run;
         end
@@ -142,7 +155,8 @@ module tb_flash_boot;
             s2 = press == 2;
             $display("PRESS cycle=%0d read_in_flight=%0d", cycles, dut.pm.busy && !dut.pm.busy_we);
             repeat (press_len) @(posedge clk);
-            #1 s1 = 0;
+            #1 $display("RELEASE sp=%0d sp_max=%0d heap_hi=%0d", sp, sp_max, heap_hi);
+            s1 = 0;
             s2 = 0;
         end
     end
@@ -156,9 +170,11 @@ module tb_flash_boot;
             fd = $fopen("screen.txt", "w");
             for (i = 0; i < 8192; i = i + 1) $fdisplay(fd, "%04x", dut.computer.u_mem.u_screen.mem[i]);
             $fclose(fd);
-            $display("RESULT running=%0d busy=%0d err_header=%0d err_crc=%0d executed=%0d fetches=%0d loads=%0d errors=%0d model_errors=%0d",
-                     running, busy, err_header, err_crc, executed, fetches, loads, errors,
-                     `MODEL_ERRORS);
+            $display("RESULT running=%0d busy=%0d err_header=%0d err_crc=%0d executed=%0d ",
+                     running, busy, err_header, err_crc, executed,
+                     "fetches=%0d loads=%0d errors=%0d model_errors=%0d words=%0d ",
+                     fetches, loads, errors, `MODEL_ERRORS, prog_words,
+                     "name=%0d sp=%0d sp_max=%0d heap_hi=%0d", prog_name, sp, sp_max, heap_hi);
             $finish;
         end
     endtask

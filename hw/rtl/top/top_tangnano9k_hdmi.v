@@ -1,7 +1,8 @@
 `default_nettype none
 
 // Hack computer with its program loaded from flash slot 0 into PSRAM, Hack
-// screen on HDMI. S1 resets the CPU, S2 loads the program again.
+// screen on HDMI, status text on the 1.14" LCD. S1 resets the CPU, S2 loads
+// the program again.
 // LEDs: 0 = loader busy, 1 = running, 2 = bad header, 3 = bad CRC,
 // 4 = PSRAM ready, 5 = 1 Hz heartbeat.
 module top (
@@ -22,7 +23,12 @@ module top (
     output wire        tmds_clk_p,
     output wire        tmds_clk_n,
     output wire [2:0]  tmds_d_p,
-    output wire [2:0]  tmds_d_n
+    output wire [2:0]  tmds_d_n,
+    output wire        lcd_resetn,
+    output wire        lcd_clk,
+    output wire        lcd_cs,
+    output wire        lcd_rs,
+    output wire        lcd_data
 );
 
     // Power-on reset: about 2.4 ms at 27 MHz
@@ -65,6 +71,10 @@ module top (
     wire [12:0] vaddr;
     wire [15:0] vdata;
     wire busy, running, err_header, err_crc;
+    wire [2:0] boot_state;
+    wire [127:0] prog_name;
+    wire [15:0] prog_words, dbg_instr, dbg_a, dbg_d, sp, sp_max;
+    wire [14:0] dbg_pc, heap_hi;
 
     flash_boot_system system (
         .clk(clk), .por_n(~por), .s1(s1_pressed), .s2(s2_pressed),
@@ -74,7 +84,30 @@ module top (
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
         .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done),
         .vclk(clk_pix), .vaddr(vaddr), .vdata(vdata),
-        .busy(busy), .running(running), .err_header(err_header), .err_crc(err_crc)
+        .busy(busy), .running(running), .err_header(err_header), .err_crc(err_crc),
+        .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),
+        .dbg_pc(dbg_pc), .dbg_instr(dbg_instr), .dbg_a(dbg_a), .dbg_d(dbg_d),
+        .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi)
+    );
+
+    // Status LCD. The loader always reads slot 0.
+    wire frame_start, frame_ready, pix_req;
+    wire [7:0] pix_x, pix_y;
+    wire [15:0] pixel;
+
+    debug_screen screen (
+        .clk(clk), .rst(por), .frame_start(frame_start), .frame_ready(frame_ready),
+        .pix_req(pix_req), .pix_x(pix_x), .pix_y(pix_y), .pixel(pixel),
+        .boot_state(boot_state), .slot(5'd0), .prog_name(prog_name),
+        .prog_words(prog_words), .pc(dbg_pc), .instr(dbg_instr), .a(dbg_a), .d(dbg_d),
+        .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi)
+    );
+
+    st7789_driver lcd (
+        .clk(clk), .rst(por), .frame_start(frame_start), .frame_ready(frame_ready),
+        .pix_req(pix_req), .pix_x(pix_x), .pix_y(pix_y), .pixel(pixel),
+        .lcd_resetn(lcd_resetn), .lcd_clk(lcd_clk), .lcd_cs(lcd_cs),
+        .lcd_rs(lcd_rs), .lcd_data(lcd_data)
     );
 
     // Video

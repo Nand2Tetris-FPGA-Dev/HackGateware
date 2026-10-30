@@ -61,6 +61,31 @@ The board loads slot 0 at power-on. S1 restarts the program, S2 loads it
 from flash again. LEDs: 0 loading, 1 running, 2 no valid program in slot 0,
 3 CRC error, 4 PSRAM ready, 5 heartbeat.
 
+## Status screen
+
+The `hdmi` build also drives Sipeed's 1.14" 240x135 ST7789 LCD on the 8-pin
+connector, about 26 times a second:
+
+```text
+HACK  slot  0           RUN
+Pong             29149 words
+
+PC   12345 IR 1110110000010000
+A       17 D     2310
+SP     261 max    290
+heap  2310
+```
+
+- Boot state: WAIT (no PSRAM yet), LOAD, RUN, RESET (S1 held), NO IMG or
+  BADCRC. The name and size only show in RUN and RESET.
+- PC is the address of the instruction in IR. A and D are signed.
+- SP is RAM[0], and max is the highest value written to it.
+- heap is the highest address written in 2048-16383.
+- SP, max and heap clear while the CPU is in reset.
+
+Pins (from `hw/boards/tangnano9k/lcd.cst`): reset 47, clock 76, CS 48,
+RS 49, data 77.
+
 ## Jack programs
 
 Jack programs are compiled with the nand2tetris JackCompiler (it needs Java) and
