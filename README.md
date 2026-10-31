@@ -61,6 +61,13 @@ The board loads slot 0 at power-on. S1 restarts the program, S2 loads it
 from flash again. LEDs: 0 loading, 1 running, 2 no valid program in slot 0,
 3 CRC error, 4 PSRAM ready, 5 heartbeat.
 
+Once the `hdmi` build runs, `prog flash` writes over the serial link: it finds
+the board's port by itself (`--port COM12` names it), checks the CRC of what it
+wrote, and for slot 0 waits until the new program runs. After any slot is
+written the board loads slot 0 again, as after S2. If no board answers on
+serial it says so and writes over JTAG instead (about 100 s); `--jtag` forces
+that. If HackLink has the port open, close it or use `--jtag`.
+
 ## Status screen
 
 The `hdmi` build also drives Sipeed's 1.14" 240x135 ST7789 LCD on the 8-pin
@@ -76,8 +83,9 @@ SP     261 max    290
 heap  2310
 ```
 
-- Boot state: WAIT (no PSRAM yet), LOAD, RUN, RESET (S1 held), NO IMG or
-  BADCRC. The name and size only show in RUN and RESET.
+- Boot state: WAIT (no PSRAM yet), LOAD, RUN, RESET (S1 held), NO IMG,
+  BADCRC or WRITE (`prog flash` over serial). The name and size only show in
+  RUN and RESET.
 - PC is the address of the instruction in IR. A and D are signed.
 - SP is RAM[0], and max is the highest value written to it.
 - heap is the highest address written in 2048-16383.
@@ -100,6 +108,7 @@ COBS-encoded and ended by 0x00. `hw/sim/serial_frames.py` is the reference.
 | 0x01 KEY | 1 byte, the Hack key code (0 = no key) | none |
 | 0x02 ECHO | 0-16 bytes | 0x82, same payload |
 | 0x03 STATUS | none | 0x83, 37 bytes |
+| 0x10-0x16 | flash writes: HELLO, BEGIN, ERASE, DATA, PROGRAM, CRC, END | type + 0x80, not DATA |
 
 The STATUS reply is little-endian: boot state (1 byte), then 16-bit PC, IR,
 A, D, SP, SP max, heap, keyboard and program words, the 16-byte name, and a
