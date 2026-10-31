@@ -11,6 +11,10 @@
 // trace.txt gets "pc instr a d" per instruction and "reset" each time the
 // CPU goes into reset. Prints "STATE n" when boot_state changes and a
 // RESULT line (name in decimal).
+// +FL_AT=n runs fl.txt after instruction n (0: once PSRAM is ready), one
+// "op a b" per line (a in hex): 1 BEGIN, 2 ERASE addr size, 4 PROGRAM addr len,
+// 5 CRC addr len, 6 END print "FLRSP op status crc"; 3 DATA writes
+// pb[a % 256 + i] = data.hex[a + i] for i < b; 7 waits a cycles; 8 ends the run.
 module tb_flash_boot;
     localparam real HALF_NS = 500_000_000.0 / 27_000_000;
 
@@ -26,6 +30,13 @@ module tb_flash_boot;
     wire [127:0] prog_name;
     wire [15:0] prog_words, dbg_instr, dbg_a, dbg_d, sp, sp_max;
     wire [14:0] dbg_pc, heap_hi;
+    reg fl_req = 0, pb_we = 0;
+    reg [2:0] fl_op = 0;
+    reg [23:0] fl_addr = 0, fl_len = 0;
+    reg [7:0] pb_addr = 0, pb_data = 0;
+    wire fl_busy, fl_rsp;
+    wire [1:0] fl_status;
+    wire [31:0] fl_crc;
 
     flash_boot_system dut (
         .clk(clk), .por_n(por_n), .s1(s1), .s2(s2), .keyboard(16'd0),
@@ -38,7 +49,10 @@ module tb_flash_boot;
         .busy(busy), .running(running), .err_header(err_header), .err_crc(err_crc),
         .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),
         .dbg_pc(dbg_pc), .dbg_instr(dbg_instr), .dbg_a(dbg_a), .dbg_d(dbg_d),
-        .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi)
+        .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi),
+        .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
+        .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
     );
 
     spi_flash_model #(.HEXFILE("flash.hex"), .SIZE(262144)) flash (
@@ -97,6 +111,14 @@ module tb_flash_boot;
             errors = errors + 1;
         end
         pressed = s1 || s2;
+        if (running && dut.clearing) begin
+            $display("FAIL running while clearing at %0d", cycles);
+            errors = errors + 1;
+        end
+        if (dut.computer.pm_req && dut.session) begin
+            $display("FAIL fetch in a session at %0d", cycles);
+            errors = errors + 1;
+        end
         if (dut.cpu_reset && !was_reset) $fdisplay(trace_fd, "reset");
         was_reset = dut.cpu_reset;
         if ((err_header || err_crc) && err_at < 0) err_at = cycles;
@@ -158,6 +180,58 @@ module tb_flash_boot;
             #1 $display("RELEASE sp=%0d sp_max=%0d heap_hi=%0d", sp, sp_max, heap_hi);
             s1 = 0;
             s2 = 0;
+        end
+    end
+
+    integer fl_at, fl_fd, fl_n, fl_o, fl_a, fl_b, fl_i, fl_k;
+    reg [7:0] fl_data [0:255];
+
+    task fl_request(input [2:0] op, input [23:0] addr, input [23:0] len);
+        begin
+            @(posedge clk);
+            while (fl_busy) @(posedge clk);
+            #1 fl_req = 1;
+            fl_op = op;
+            fl_addr = addr;
+            fl_len = len;
+            @(posedge clk);
+            #1 fl_req = 0;
+            fl_k = 0;
+            while (!fl_rsp && fl_k < 4000000) begin
+                @(posedge clk);
+                #1 fl_k = fl_k + 1;
+            end
+            if (fl_rsp) $display("FLRSP %0d %0d %08x", op, fl_status, fl_crc);
+            else $display("FAIL no reply to %0d", op);
+        end
+    endtask
+
+    initial begin
+        if ($value$plusargs("FL_AT=%d", fl_at)) begin
+            $readmemh("data.hex", fl_data);
+            fl_fd = $fopen("fl.txt", "r");
+            wait (init_done && por_n);
+            while (executed < fl_at) @(posedge clk);
+            fl_n = $fscanf(fl_fd, "%d %h %d\n", fl_o, fl_a, fl_b);
+            while (fl_n == 3) begin
+                if (fl_o == 3) begin
+                    for (fl_i = 0; fl_i < fl_b; fl_i = fl_i + 1) begin
+                        @(posedge clk);
+                        #1 pb_we = 1;
+                        pb_addr = (fl_a + fl_i) % 256;
+                        pb_data = fl_data[fl_a + fl_i];
+                    end
+                    @(posedge clk);
+                    #1 pb_we = 0;
+                end else if (fl_o == 7) begin
+                    repeat (fl_a) @(posedge clk);
+                end else if (fl_o == 8) begin
+                    finish_run;
+                end else begin
+                    fl_request(fl_o, fl_a, fl_b);
+                end
+                fl_n = $fscanf(fl_fd, "%d %h %d\n", fl_o, fl_a, fl_b);
+            end
         end
     end
 

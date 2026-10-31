@@ -57,6 +57,7 @@ class SimResult:
     ram: list[int]
     screen: list[int]
     cycles: int
+    clear_cycles: int | None = None
 
 
 def _read_words(path: Path) -> list[int]:
@@ -74,6 +75,7 @@ def run_computer(
     progmem: str = "sim",
     reset_delay: int = 0,
     reset_len: int = 2,
+    clear: bool = False,
 ) -> SimResult:
     """Run the RTL computer for `steps` instructions. keyboard takes at most one
     (step, value) pair, applied before that step. progmem is "sim" (progmem_sim
@@ -99,6 +101,8 @@ def run_computer(
             plusargs["RESET_LEN"] = str(reset_len)
         if trace:
             plusargs["TRACE"] = "1"
+        if clear:
+            plusargs["CLEAR"] = "1"
         defines = {"PM_LATENCY": str(pm_latency)}
         if progmem == "rom":
             defines.update({"PROGMEM_ROM": "1", "ROM_HEX": '"rom.hex"'})
@@ -109,12 +113,14 @@ def run_computer(
         out = iverilog(COMPUTER_SOURCES, "tb_computer", plusargs=plusargs,
                        defines=defines, cwd=work)
         done = re.search(r"DONE \d+ instructions in (\d+) cycles", out)
-        if not done:
+        if not done or "FAIL" in out:
             raise SimError(out)
+        cleared = re.search(r"CLEARED (\d+)", out)
         lines = (work / "trace.txt").read_text().splitlines() if trace else []
         return SimResult(
             trace=[tuple(int(f, 16) for f in line.split()) for line in lines],
             ram=_read_words(work / "ram.txt"),
             screen=_read_words(work / "screen.txt"),
             cycles=int(done.group(1)),
+            clear_cycles=int(cleared.group(1)) if cleared else None,
         )

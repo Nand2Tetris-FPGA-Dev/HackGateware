@@ -1,4 +1,5 @@
 import re
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +16,9 @@ MODEL = HW / "third_party/psram_controller/sim/model"
 FLASH_SIZE = 262144  # slots 0 and 1, so reading the wrong slot finds 0xFF
 S1, S2 = 1, 2
 EXEC, READ, LOAD, IDLE = 0, 1, 2, 3  # what the press waits for after PRESS_AT
+# tb_flash_boot fl.txt ops: flash session requests, page buffer bytes, wait, end the run
+BEGIN, ERASE, DATA, PROGRAM, CRC, END, PAUSE, STOP = 1, 2, 3, 4, 5, 6, 7, 8
+FL_DATA = bytes((i * 13 + 7) & 0xFF for i in range(256))
 
 pytestmark = pytest.mark.requires_iverilog
 
@@ -37,10 +41,13 @@ class Run:
     screen: list[int]
     states: list[int]  # boot_state, each time it changes
     held_stats: tuple[int, int, int] | None  # (sp, sp_max, heap_hi) just before the release
+    fl_rsps: list[tuple[int, int, int]]  # (op, status, crc) per flash session reply
+    ram: list[int]
 
 
-def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False):
-    """press = (S1 or S2, at, wait_for, delay, length)."""
+def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False, fl=None):
+    """press = (S1 or S2, at, wait_for, delay, length). fl = (at, [(op, a, b)])
+    runs flash session commands after instruction `at` (see tb_flash_boot)."""
     (tmp_path / "flash.hex").write_text(flash_hex(image))
     plusargs = {"STEPS": str(steps),
                 "LIMIT": str(300 * (len(image) + len(image2)) + 45 * steps + 50_000)}
@@ -49,9 +56,14 @@ def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False):
         plusargs.update(PRESS=str(which), PRESS_AT=str(at), WAIT_FOR=str(wait_for),
                         PRESS_DELAY=str(delay), PRESS_LEN=str(length))
         (tmp_path / "flash2.hex").write_text(flash_hex(image2))
+    if fl:
+        plusargs["FL_AT"] = str(fl[0])
+        (tmp_path / "fl.txt").write_text("".join(f"{o} {a:x} {b}\n" for o, a, b in fl[1]))
+        (tmp_path / "data.hex").write_text("".join(f"{b:02x}\n" for b in FL_DATA))
     sources = [HW / "sim/tb/tb_flash_boot.v", HW / "rtl/top/flash_boot_system.v",
                HW / "sim/models/spi_flash_model.v", HW / "rtl/io/spi_flash_reader.v",
                HW / "rtl/io/boot_loader.v", HW / "rtl/debug/hack_stats.v",
+               HW / "rtl/io/flash_session.v", HW / "rtl/io/spi_flash_writer.v",
                HW / "rtl/progmem/progmem_psram.v",
                HW / "rtl/top/hack_computer.v", HW / "rtl/cpu/hack_cpu.v",
                HW / "rtl/cpu/hack_alu.v", HW / "rtl/mem/hack_memory.v",
@@ -65,6 +77,8 @@ def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False):
                    defines={"REAL_CTRL": "1"} if real else None, cwd=tmp_path)
     m = re.search(r"RESULT (.*)", out)
     assert m and "ERROR" not in out and "FAIL" not in out and "TIMEOUT" not in out, out
+    for bad in ("IGNORED", "BUSY", "REJECTED"):
+        assert bad not in out, out
     result = {k: int(v) for k, v in (f.split("=") for f in m.group(1).split())}
     assert result["errors"] == 0 and result["model_errors"] == 0, out
     segments = [[]]
@@ -77,8 +91,11 @@ def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False):
     pressed = re.search(r"read_in_flight=(\d)", out)
     states = [int(v) for v in re.findall(r"STATE (\S+)", out)]
     held = re.search(r"RELEASE sp=(\d+) sp_max=(\d+) heap_hi=(\d+)", out)
+    fl_rsps = [(int(o), int(st), int(c, 16))
+               for o, st, c in re.findall(r"FLRSP (\d+) (\d+) (\S+)", out)]
+    ram = [int(w, 16) for w in (tmp_path / "ram.txt").read_text().split()]
     return Run(result, pressed and pressed.group(1) == "1", segments, screen, states,
-               held and tuple(int(v) for v in held.groups()))
+               held and tuple(int(v) for v in held.groups()), fl_rsps, ram)
 
 
 def loads_for(rom):
@@ -185,7 +202,7 @@ def test_boots_on_psram_ctrl(tmp_path):
     assert_runs(run.segments[0], rom, HackMachine(rom))
 
 
-WAIT, LOADING, RUN, RESET, NO_IMG, BAD_CRC = range(6)
+WAIT, LOADING, RUN, RESET, NO_IMG, BAD_CRC, WRITE = range(7)
 
 
 def bad_crc_image(rom):
@@ -257,3 +274,65 @@ def test_flash_boot_stats_clear_on_s1(tmp_path):
     r = run.result
     assert (r["sp"], r["sp_max"], r["heap_hi"]) == (262, 290, 2310)
     assert len(run.segments) == 2
+
+
+def test_session_holds_cpu_and_shows_write(tmp_path):
+    rom = program("screen_pattern")
+    run = run_boot(tmp_path, build_image(rom, "pattern"), 10**6,
+                   fl=(500, [(BEGIN, 0, 0), (PAUSE, 3000, 0), (STOP, 0, 0)]))
+    assert [r[:2] for r in run.fl_rsps] == [(BEGIN, 0)]
+    r = run.result
+    assert r["running"] == 0 and 500 <= r["executed"] <= 502
+    assert run.states[-2:] == [RUN, WRITE]
+
+
+# Copies RAM[16], SCREEN[8191] and RAM[16383] to RAM[17..19], then writes all three.
+# After a restart the copies show what memory held when the program started.
+COPY_ROM = """
+@16
+D=M
+@17
+M=D
+@24575
+D=M
+@18
+M=D
+@16383
+D=M
+@19
+M=D
+@1234
+D=A
+@16
+M=D
+@24575
+M=-1
+@16383
+M=-1
+(END)
+@END
+0;JMP
+"""
+
+
+def test_session_end_clears_and_reboots(tmp_path):
+    rom = assemble(COPY_ROM)
+    run = run_boot(tmp_path, build_image(rom, "copy"), 60,
+                   fl=(30, [(BEGIN, 0, 0), (PAUSE, 100, 0), (END, 0, 0)]))
+    assert [r[:2] for r in run.fl_rsps] == [(BEGIN, 0), (END, 0)]
+    assert run.result["loads"] == 2 * loads_for(rom)
+    assert len(run.segments) == 2 and run.segments[1][0][0] == 0
+    assert len(run.segments[1]) > 22  # the whole program ran again
+    assert run.ram[16:20] == [1234, 0, 0, 0]
+    assert WRITE in run.states and run.states[-1] == RUN
+
+
+def test_session_writes_and_reads_flash(tmp_path):
+    rom = program("screen_pattern")
+    image = build_image(rom, "pattern")
+    cmds = [(BEGIN, 0, 0), (CRC, 0, len(image)), (ERASE, 0x20000, 0), (DATA, 0, 256),
+            (PROGRAM, 0x20000, 256), (CRC, 0x20000, 256), (STOP, 0, 0)]
+    run = run_boot(tmp_path, image, 10**6, fl=(100, cmds))
+    assert [r[:2] for r in run.fl_rsps] == [(op, 0) for op in (BEGIN, CRC, ERASE, PROGRAM, CRC)]
+    assert run.fl_rsps[1][2] == zlib.crc32(image)
+    assert run.fl_rsps[4][2] == zlib.crc32(FL_DATA)

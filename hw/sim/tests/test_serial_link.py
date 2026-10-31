@@ -3,6 +3,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from hacktools.link import (
+    BEGIN, CRC, DATA, END, ERASE, HELLO, PROGRAM, crc_payload, data_payload, erase_payload,
+    program_payload,
+)
 
 from serial_frames import decode_frames, encode_frame, parse_status
 from simrun import iverilog
@@ -43,6 +47,8 @@ class Run:
     tx: list[tuple[int, int]] = field(default_factory=list)     # (byte, cycle)
     kbd: list[tuple[int, int]] = field(default_factory=list)    # (cycle, value)
     sent: list[int] = field(default_factory=list)
+    fl: list[tuple[int, int, int, int]] = field(default_factory=list)  # (op, addr, len, cycle)
+    pb: list[tuple[int, int, int]] = field(default_factory=list)       # (addr, data, cycle)
     ends: list[int] = field(default_factory=list)               # last SENT of each bytes item
     end: int = 0
 
@@ -50,7 +56,8 @@ class Run:
         return decode_frames(bytes(b for b, _ in self.tx))
 
 
-def run(tmp_path, items, tail=5000, bad_max=None, flip=False, clks=CLKS_PER_BIT):
+def run(tmp_path, items, tail=5000, bad_max=None, flip=False, clks=CLKS_PER_BIT,
+        fl_wait=0, fl_status=0, fl_crc=0):
     """items: bytes (sent back to back), ("idle", bits) or ("brk", bits)."""
     lines, last_index, idle, count = [], [], 0, 0
     for item in items:
@@ -69,6 +76,7 @@ def run(tmp_path, items, tail=5000, bad_max=None, flip=False, clks=CLKS_PER_BIT)
     plusargs = {k: f"{STATUS[v]:x}" for k, v in STATUS_ARGS.items()}
     plusargs["NAME"] = NAME.hex()
     plusargs["TAIL"] = str(tail)
+    plusargs |= {"FL_WAIT": str(fl_wait), "FL_STATUS": f"{fl_status:x}", "FL_CRC": f"{fl_crc:x}"}
     if flip:
         plusargs["FLIP"] = "1"
     defines = {"CLKS_PER_BIT": str(clks), "WATCHDOG": str(WATCHDOG)}
@@ -88,8 +96,12 @@ def run(tmp_path, items, tail=5000, bad_max=None, flip=False, clks=CLKS_PER_BIT)
             r.sent.append(int(rest[0]))
         elif word == "END":
             r.end = int(rest[0])
-        elif word == "TXERR":
-            pytest.fail(f"uart_tx framing error: {line}")
+        elif word == "FLREQ":
+            r.fl.append((int(rest[0]), int(rest[1], 16), int(rest[2]), int(rest[3])))
+        elif word == "PB":
+            r.pb.append((int(rest[0], 16), int(rest[1], 16), int(rest[2])))
+        elif word in ("TXERR", "FLREQBUSY"):
+            pytest.fail(f"testbench error: {line}")
     r.ends = [r.sent[i] for i in last_index]
     return r
 
@@ -230,3 +242,121 @@ def test_silent_without_requests(tmp_path):
     r = run(tmp_path, [key(0x41), key(0x42), ("idle", 30), key(0)])
     assert [v for _, v in r.kbd] == [0x41, 0x42, 0]
     assert r.tx == []
+
+
+def flash_ops(r):
+    return [(op, addr, length) for op, addr, length, _ in r.fl]
+
+
+def test_hello_reply(tmp_path):
+    r = run(tmp_path, [encode_frame(HELLO), ("idle", REPLY_BITS)])
+    assert bytes(b for b, _ in r.tx) == bytes.fromhex("04 90 01 E6 00")
+    assert r.fl == []
+
+
+def test_data_to_page_buffer(tmp_path):
+    chunk = bytes((i * 37) & 0xFF for i in range(32))       # has a zero for COBS
+    longest = bytes((i * 11 + 3) & 0xFF for i in range(61))
+    r = run(tmp_path, [encode_frame(DATA, data_payload(32, chunk)),
+                       encode_frame(DATA, data_payload(195, longest)),
+                       STATUS_REQ, ("idle", REPLY_BITS)])
+    assert [(a, d) for a, d, _ in r.pb] == (list(zip(range(32, 64), chunk))
+                                            + list(zip(range(195, 256), longest)))
+    assert r.pb[-1][2] <= r.ends[1] + 70
+    assert r.fl == []
+    assert [t for t, _ in r.replies()] == [0x83]
+    assert status_of(r)["bad_frames"] == 0
+
+
+def test_flash_request_and_reply(tmp_path):
+    r = run(tmp_path, [encode_frame(PROGRAM, program_payload(0x020100, 256)),
+                       ("idle", REPLY_BITS)], fl_wait=100, fl_status=3)
+    assert flash_ops(r) == [(4, 0x020100, 256)]
+    assert r.fl[0][3] <= r.ends[0] + 10
+    assert r.replies() == [(0x94, b"\x03")]
+
+
+def test_flash_request_fields(tmp_path):
+    frames = [
+        encode_frame(BEGIN),
+        encode_frame(ERASE, erase_payload(0x3F0000, True)),
+        encode_frame(ERASE, erase_payload(0x001000, False)),
+        encode_frame(CRC, crc_payload(0x012345, 0x0ABCDE)),
+        encode_frame(END),
+    ]
+    items = []
+    for f in frames:
+        items += [f, ("idle", REPLY_BITS)]
+    r = run(tmp_path, items, fl_crc=0xDEADBEEF)
+    assert flash_ops(r) == [(1, 0, 0), (2, 0x3F0000, 1), (2, 0x001000, 0),
+                            (5, 0x012345, 0x0ABCDE), (6, 0, 0)]
+    crc = bytes([0]) + (0xDEADBEEF).to_bytes(4, "little")
+    assert r.replies() == [(0x91, b"\x00"), (0x92, b"\x00"), (0x92, b"\x00"),
+                           (0x95, crc), (0x96, b"\x00")]
+
+
+def test_key_while_flash_pending(tmp_path):
+    r = run(tmp_path, [encode_frame(PROGRAM, program_payload(0, 256)), key(65),
+                       ("idle", REPLY_BITS)], fl_wait=3000)
+    assert [v for _, v in r.kbd] == [65]
+    assert r.kbd[0][0] <= r.ends[1] + 3
+    assert r.kbd[0][0] < r.tx[0][1]
+    assert [t for t, _ in r.replies()] == [0x94]
+
+
+def test_bad_flash_lengths(tmp_path):
+    bad = [
+        encode_frame(ERASE, b"\x00\x10\x00"),
+        encode_frame(DATA, b"\x05"),
+        encode_frame(END, b"\x00"),
+        encode_frame(HELLO, b"\x01"),
+        encode_frame(BEGIN, b"\x00"),
+        encode_frame(PROGRAM, b"\x00\x00\x00\x10"),
+        encode_frame(CRC, b"\x00\x00\x00\x10\x00"),
+    ]
+    r = run(tmp_path, bad + [STATUS_REQ, ("idle", REPLY_BITS)])
+    assert r.fl == [] and r.pb == []
+    assert [t for t, _ in r.replies()] == [0x83]
+    assert status_of(r)["bad_frames"] == len(bad)
+
+
+def test_flash_request_while_busy(tmp_path):
+    crc = encode_frame(CRC, crc_payload(0, 16))
+    data = encode_frame(DATA, data_payload(0, bytes(range(1, 9))))
+    program = encode_frame(PROGRAM, program_payload(0, 16))
+    r = run(tmp_path, [program, crc, encode_frame(HELLO), data,
+                       ("idle", 3000 // CLKS_PER_BIT + REPLY_BITS), crc, ("idle", REPLY_BITS),
+                       STATUS_REQ, ("idle", REPLY_BITS)], fl_wait=3000)
+    assert flash_ops(r) == [(4, 0, 16), (5, 0, 16)]
+    assert r.pb == []       # the page buffer may be in use
+    assert [t for t, _ in r.replies()] == [0x94, 0x95, 0x83]
+    assert status_of(r)["bad_frames"] == 0
+
+
+def test_flash_request_while_reply_waits(tmp_path):
+    # BEGIN's reply waits behind the ECHO reply; CRC comes in meanwhile.
+    echo = encode_frame(0x02, bytes(range(1, 17)))
+    r = run(tmp_path, [echo, encode_frame(BEGIN), encode_frame(CRC, crc_payload(0, 16)),
+                       ("idle", 2 * REPLY_BITS)])
+    assert flash_ops(r) == [(1, 0, 0)]
+    assert [t for t, _ in r.replies()] == [0x82, 0x91]
+    assert r.fl[0][3] < r.tx[0][1] + 20 * 10 * CLKS_PER_BIT
+
+
+def test_flash_request_while_reply_goes_out(tmp_path):
+    # BEGIN lands while CRC's 8-byte reply is on the wire; it must not change that reply.
+    r = run(tmp_path, [encode_frame(CRC, crc_payload(0, 16)), encode_frame(BEGIN),
+                       ("idle", REPLY_BITS)], fl_crc=0x12345678)
+    assert r.fl[0][3] < r.ends[1] < r.tx[-1][1]
+    assert flash_ops(r) == [(5, 0, 16)]
+    assert r.replies() == [(0x95, bytes([0]) + (0x12345678).to_bytes(4, "little"))]
+
+
+def test_flash_frames_feed_watchdog(tmp_path):
+    gap = 15000 // CLKS_PER_BIT
+    items = [key(0x41)]
+    for _ in range(40000 // 15000):
+        items += [("idle", gap), encode_frame(HELLO)]
+    r = run(tmp_path, items)
+    assert r.end - r.ends[0] >= 30000
+    assert [v for _, v in r.kbd] == [0x41]

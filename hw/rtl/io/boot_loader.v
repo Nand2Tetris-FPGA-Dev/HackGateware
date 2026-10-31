@@ -58,16 +58,7 @@ module boot_loader (
         name = 0;
     end
 
-    // CRC-32 as in zlib.crc32: reflected, poly 0xEDB88320, init and final XOR all ones.
-    function [31:0] crc32_byte(input [31:0] c, input [7:0] d);
-        integer i;
-        begin
-            crc32_byte = c;
-            for (i = 0; i < 8; i = i + 1)
-                crc32_byte = (crc32_byte[0] ^ d[i]) ? (crc32_byte >> 1) ^ 32'hEDB88320
-                                                    : crc32_byte >> 1;
-        end
-    endfunction
+`include "crc32.vh"
 
     function [7:0] magic_byte(input [1:0] i);
         magic_byte = i == 0 ? "H" : i == 1 ? "A" : i == 2 ? "C" : "K";

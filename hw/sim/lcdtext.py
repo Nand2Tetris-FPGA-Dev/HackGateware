@@ -12,7 +12,7 @@ def read_frame(path: Path) -> list[list[int]]:
 
 
 COLS, ROWS = 30, 16
-STATES = {0: "WAIT", 1: "LOAD", 2: "RUN", 3: "RESET", 4: "NO IMG", 5: "BADCRC"}
+STATES = {0: "WAIT", 1: "LOAD", 2: "RUN", 3: "RESET", 4: "NO IMG", 5: "BADCRC", 6: "WRITE"}
 
 
 def read_font(path: Path) -> list[list[int]]:
