@@ -54,7 +54,7 @@ module tb_computer;
 
     psram_host_model psram (
         .clk(clk), .rst_n(1'b1),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(1'b0),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
         .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done)
     );

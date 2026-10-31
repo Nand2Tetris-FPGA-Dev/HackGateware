@@ -49,7 +49,7 @@ module tb_debug_system;
 
     psram_host_model mem (
         .clk(clk), .rst_n(por_n),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(1'b0),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
         .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done)
     );

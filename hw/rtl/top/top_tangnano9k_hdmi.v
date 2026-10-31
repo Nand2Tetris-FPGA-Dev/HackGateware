@@ -52,7 +52,7 @@ module top (
 
     psram_ctrl #(.CLK_HZ(27_000_000)) psram (
         .clk(clk), .rst_n(~por),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(1'b0),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
         .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done),
         .O_psram_ck(O_psram_ck), .O_psram_ck_n(O_psram_ck_n),

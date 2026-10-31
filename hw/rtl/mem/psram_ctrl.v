@@ -2,7 +2,8 @@
 
 // Controller for the Tang Nano 9K's internal PSRAM: two W955D8MBYA x8 HyperBus
 // dies in lockstep, one 32-bit word per access (16 bits in each die). Single
-// word reads and writes of the memory space, CR0 left at its default.
+// word reads and writes of the memory space, CR0 left at its default, plus
+// burst reads of a whole wrapped group.
 //
 // Ported from psram_controller v0.3.0 (rtl/psram_core.veryl, rtl/psram_phy.veryl),
 // https://github.com/takayuki-nagata/psram_controller at a2c41bd
@@ -15,6 +16,13 @@
 // write, R = tRWR in cycles (1 up to 27.7 MHz); req_ready is high again in that
 // cycle. req_addr is a 4-aligned byte address below 8 MB.
 //
+// req_burst with a read returns the 16 words of the 64-byte group holding
+// req_addr, requested word first, wrapping in the group: CR0's default is a
+// legacy wrapped burst of 32 bytes per die (datasheet sec. 9.4.1, CR0[1:0]).
+// rsp_word pulses as each word is sampled, with it on rsp_rdata: word k at
+// 31 + R + 2k cycles after the accept. rsp_valid follows the last word at
+// 64 + R, as for a single read.
+//
 // CK runs at clk/2. It's registered on the falling edge of clk while CS#, DQ
 // and RWDS change on the rising edge, so data is centered on CK.
 module psram_ctrl #(
@@ -25,10 +33,12 @@ module psram_ctrl #(
     input  wire        req_valid,
     output wire        req_ready,
     input  wire        req_we,
+    input  wire        req_burst,
     input  wire [23:0] req_addr,
     input  wire [31:0] req_wdata,
     input  wire [3:0]  req_wstrb,
     output reg         rsp_valid,
+    output reg         rsp_word,
     output reg  [31:0] rsp_rdata,
     output wire        init_done,
     output wire [1:0]  O_psram_ck,
@@ -60,12 +70,14 @@ module psram_ctrl #(
     reg [15:0] timer;
     reg [39:0] ca;
     reg we;
+    reg burst;
     reg [31:0] wdata;
     reg [3:0] wstrb;
     reg cs_n, reset_n, ck, ck_en, dq_oe, rwds_oe;
     reg [15:0] dq_out;
     reg [1:0] rwds_out;
     wire [15:0] dq_in = IO_psram_dq;
+    wire [15:0] read_last = burst ? 16'd32 : 16'd2;  // timer of the last high half
 
     assign req_ready = state == IDLE;
     assign init_done = state != RESET_ASSERT && state != RESET_WAIT;
@@ -89,9 +101,11 @@ module psram_ctrl #(
             timer <= 0;
             ca <= 0;
             we <= 0;
+            burst <= 0;
             wdata <= 0;
             wstrb <= 0;
             rsp_valid <= 0;
+            rsp_word <= 0;
             rsp_rdata <= 0;
             cs_n <= 1;
             reset_n <= 0;
@@ -103,6 +117,7 @@ module psram_ctrl #(
             rwds_out <= 0;
         end else begin
             rsp_valid <= 0;
+            rsp_word <= 0;
 
             case (state)
                 RESET_ASSERT:
@@ -127,6 +142,7 @@ module psram_ctrl #(
                     timer <= 0;
                     if (req_valid) begin
                         we <= req_we;
+                        burst <= req_burst && !req_we;
                         wdata <= req_wdata;
                         wstrb <= req_wstrb;
                         ca <= ca_req[39:0];
@@ -199,28 +215,29 @@ module psram_ctrl #(
                 end
 
                 // timer 0: CK rises on clock 15 and the dies launch the low half
-                // timer 1, 2: sample each half a cycle after its CK edge
-                // timer 3: CS# high; held a cycle longer so the last half is
+                // odd timer: sample the low half a cycle after its CK edge
+                // even timer: sample the high half; a burst hands each word over
+                // timer last + 1: CS# high; held a cycle longer so the last half is
                 // still driven when sampled (datasheet Table 14 note 3)
                 READ_DATA: begin
                     ck <= ~ck;
                     timer <= timer + 1'b1;
-                    case (timer)
-                        16'd1: rsp_rdata[15:0] <= dq_in;
-                        16'd2: begin
-                            rsp_rdata[31:16] <= dq_in;
+                    if (timer == read_last + 16'd1) begin
+                        cs_n <= 1;
+                        ck_en <= 0;
+                        ck <= 0;
+                        timer <= 0;
+                        state <= RECOVERY;
+                    end else if (timer[0]) begin
+                        rsp_rdata[15:0] <= dq_in;
+                    end else if (timer != 0) begin
+                        rsp_rdata[31:16] <= dq_in;
+                        rsp_word <= burst;
+                        if (timer == read_last) begin
                             ck_en <= 0;
                             ck <= 0;
                         end
-                        16'd3: begin
-                            cs_n <= 1;
-                            ck_en <= 0;
-                            ck <= 0;
-                            timer <= 0;
-                            state <= RECOVERY;
-                        end
-                        default: ;
-                    endcase
+                    end
                 end
 
                 // CS# high for tRWR, then respond
