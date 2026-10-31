@@ -2,7 +2,7 @@
 
 // progmem_psram -> psram_host_model, or with REAL_CTRL psram_ctrl -> the
 // W955D8MBYA chip model. Runs ops.hex, one {op, delay, faddr, laddr, data, strb}
-// per line (4+4+16+16+32+4 bits):
+// per line (4+8+16+16+32+4 bits):
 //   0 fetch faddr
 //   1 load {laddr, data, strb}, held until load_ready like boot_loader
 //   2 load, plus a fetch of faddr `delay` cycles after load_valid goes up
@@ -10,9 +10,11 @@
 //     later; the next op starts while that read is still out
 //   4 idle for faddr cycles
 //   5 load, with progmem_psram held in reset for its first `delay` cycles
+//   6 fetch faddr, plus a load raised `delay` cycles after fetch_req
 //   f end
 // The first op starts right after reset, before init_done.
-// Prints FETCH, LOAD and ORDER lines and a RESULT line.
+// Prints FETCH, LOAD, ORDER, REQ and RSP lines and a RESULT line. at= is the
+// cycle a signal was high in, counted the same way on every line.
 module tb_progmem_psram;
     localparam real HALF_NS = 500_000_000.0 / 27_000_000;
 
@@ -26,7 +28,7 @@ module tb_progmem_psram;
     reg [31:0] load_data = 0;
     reg [3:0] load_strb = 0;
     wire load_ready;
-    wire req_valid, req_ready, req_we, rsp_valid, init_done;
+    wire req_valid, req_ready, req_we, req_burst, rsp_valid, rsp_word, init_done;
     wire [23:0] req_addr;
     wire [31:0] req_wdata, rsp_rdata;
     wire [3:0] req_wstrb;
@@ -37,9 +39,9 @@ module tb_progmem_psram;
         .fetch_ready(fetch_ready), .fetch_data(fetch_data),
         .load_valid(load_valid), .load_ready(load_ready), .load_addr(load_addr),
         .load_data(load_data), .load_strb(load_strb),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(req_burst),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
-        .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata)
+        .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata)
     );
 
 `ifdef REAL_CTRL
@@ -48,9 +50,10 @@ module tb_progmem_psram;
 
     psram_ctrl #(.CLK_HZ(27_000_000)) mem (
         .clk(clk), .rst_n(rst_n),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(1'b0),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(req_burst),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
-        .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done),
+        .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata),
+        .init_done(init_done),
         .O_psram_ck(ck), .O_psram_ck_n(ck_n), .O_psram_cs_n(cs_n),
         .O_psram_reset_n(reset_n), .IO_psram_dq(dq), .IO_psram_rwds(rwds)
     );
@@ -62,22 +65,27 @@ module tb_progmem_psram;
 `else
     psram_host_model mem (
         .clk(clk), .rst_n(rst_n),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(1'b0),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(req_burst),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
-        .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done)
+        .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata),
+        .init_done(init_done)
     );
 `define MODEL_ERRORS 0
 `endif
 
     always #(HALF_NS) clk = ~clk;
 
-    reg [75:0] ops [0:4095];
+    reg [79:0] ops [0:4095];
     integer cycle = 0, fetches = 0, readies = 0, i, t_fetch = 0, t_load = 0;
 
     always @(posedge clk) begin
         cycle <= cycle + 1;
         if (fetch_ready) readies <= readies + 1;
         if (!pm_rst_n && req_valid) $display("FAIL request during reset at %0d", cycle);
+        if (^{fetch_ready, req_valid} === 1'bx) $display("FAIL X on fetch_ready or req_valid");
+        if (req_valid && req_ready)
+            $display("REQ at=%0d we=%0d burst=%0d addr=%h", cycle, req_we, req_burst, req_addr);
+        if (rsp_valid) $display("RSP at=%0d", cycle);
         if (cycle > 2_000_000) begin
             $display("TIMEOUT");
             $finish;
@@ -86,24 +94,27 @@ module tb_progmem_psram;
 
     // Each task starts just after a clock edge and returns just after one.
     // Inputs are scrambled once taken, so the DUT has to capture them.
+    // lat 0 is fetch_ready in the cycle of fetch_req.
     task fetch(input [14:0] a);
         integer lat;
         begin
             fetch_req = 1;
             fetch_addr = a;
+            fetches = fetches + 1;
+            lat = 0;
+            #1;
+            while (!fetch_ready) begin
+                @(posedge clk);
+                #1 fetch_req = 0;
+                fetch_addr = ~a;
+                lat = lat + 1;
+                #1;
+            end
+            t_fetch = cycle;
+            $display("FETCH addr=%h data=%h lat=%0d at=%0d", a, fetch_data, lat, cycle);
             @(posedge clk);
             #1 fetch_req = 0;
             fetch_addr = ~a;
-            fetches = fetches + 1;
-            lat = 1;
-            while (!fetch_ready) begin
-                @(posedge clk);
-                #1 lat = lat + 1;
-            end
-            t_fetch = cycle;
-            $display("FETCH addr=%h data=%h lat=%0d", a, fetch_data, lat);
-            @(posedge clk);
-            #1;
         end
     endtask
 
@@ -134,14 +145,19 @@ module tb_progmem_psram;
         end
     endtask
 
-    task fetch_then_reset(input [14:0] a, input [3:0] delay);
+    // A fetch answered before the reset counts as a fetch; none may come after
+    task fetch_then_reset(input [14:0] a, input [7:0] delay);
+        integer r0;
         begin
+            r0 = readies;
             fetch_req = 1;
             fetch_addr = a;
             @(posedge clk);
             #1 fetch_req = 0;
             repeat (delay) @(posedge clk);
             #1 pm_rst_n = 0;
+            if (readies - r0 > 1) $display("FAIL %0d readies for one fetch", readies - r0);
+            fetches = fetches + readies - r0;
             @(posedge clk);
             #1 pm_rst_n = 1;
         end
@@ -151,22 +167,22 @@ module tb_progmem_psram;
         $readmemh("ops.hex", ops);
         repeat (2) @(posedge clk);
         #1 rst_n = 1;
-        for (i = 0; ops[i][75:72] != 4'hf; i = i + 1) begin
-            case (ops[i][75:72])
+        for (i = 0; ops[i][79:76] != 4'hf; i = i + 1) begin
+            case (ops[i][79:76])
                 4'h0: fetch(ops[i][66:52]);
                 4'h1: load(ops[i][50:36], ops[i][35:4], ops[i][3:0]);
                 4'h2: begin
                     fork
                         load(ops[i][50:36], ops[i][35:4], ops[i][3:0]);
                         begin
-                            repeat (ops[i][71:68]) @(posedge clk);
-                            if (ops[i][71:68] != 0) #1;
+                            repeat (ops[i][75:68]) @(posedge clk);
+                            if (ops[i][75:68] != 0) #1;
                             fetch(ops[i][66:52]);
                         end
                     join
                     $display("ORDER fetch=%0d load=%0d", t_fetch, t_load);
                 end
-                4'h3: fetch_then_reset(ops[i][66:52], ops[i][71:68]);
+                4'h3: fetch_then_reset(ops[i][66:52], ops[i][75:68]);
                 4'h4: begin
                     repeat (ops[i][67:52]) @(posedge clk);
                     #1;
@@ -176,10 +192,20 @@ module tb_progmem_psram;
                     fork
                         load(ops[i][50:36], ops[i][35:4], ops[i][3:0]);
                         begin
-                            repeat (ops[i][71:68]) @(posedge clk);
+                            repeat (ops[i][75:68]) @(posedge clk);
                             #1 pm_rst_n = 1;
                         end
                     join
+                end
+                4'h6: begin
+                    fork
+                        fetch(ops[i][66:52]);
+                        begin
+                            repeat (ops[i][75:68]) @(posedge clk);
+                            #1 load(ops[i][50:36], ops[i][35:4], ops[i][3:0]);
+                        end
+                    join
+                    $display("ORDER fetch=%0d load=%0d", t_fetch, t_load);
                 end
                 default: ;
             endcase

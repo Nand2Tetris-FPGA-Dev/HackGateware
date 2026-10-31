@@ -36,7 +36,7 @@ module tb_computer;
     reg [14:0] load_addr = 0;
     reg [31:0] load_data = 0;
     reg [3:0] load_strb = 0;
-    wire load_ready, req_valid, req_ready, req_we, rsp_valid, init_done;
+    wire load_ready, req_valid, req_ready, req_we, req_burst, rsp_valid, rsp_word, init_done;
     wire [23:0] req_addr;
     wire [31:0] req_wdata, rsp_rdata;
     wire [3:0] req_wstrb;
@@ -47,16 +47,16 @@ module tb_computer;
         .fetch_req(pm_req), .fetch_addr(pm_addr), .fetch_ready(pm_ready), .fetch_data(pm_data),
         .load_valid(load_valid), .load_ready(load_ready), .load_addr(load_addr),
         .load_data(load_data), .load_strb(load_strb),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(req_burst),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
-        .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata)
+        .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata)
     );
 
     psram_host_model psram (
         .clk(clk), .rst_n(1'b1),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(1'b0),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(req_burst),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
-        .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done)
+        .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata), .init_done(init_done)
     );
 `else
     progmem_sim #(.LATENCY(`PM_LATENCY)) pm (
@@ -66,7 +66,7 @@ module tb_computer;
 `endif
 
 `ifdef USE_PSRAM_MODEL
-    localparam STEP_CYCLES = 45;  // worst case: a line miss every instruction
+    localparam STEP_CYCLES = 110;  // worst case: a miss behind a burst, 65 + 33 + 3
 `else
     localparam STEP_CYCLES = `PM_LATENCY + 4;
 `endif
@@ -121,6 +121,23 @@ module tb_computer;
         #1 reset = 0;
     end
 
+    // Reset RESET_DELAY cycles after instruction RESET_AT, for RESET_LEN cycles, so
+    // a test can land it in the fetch or execute phase. Its own process, so
+    // instructions run during the delay are still traced; RESET executed= is how
+    // many ran before the reset.
+    event reset_go;
+    always @(reset_go) begin
+        repeat (reset_delay) @(posedge clk);
+        #1 reset = 1;
+`ifdef USE_PSRAM_MODEL
+        #1 $display("RESET executed=%0d read_in_flight=%0d", executed, pm.busy && !pm.busy_we);
+`else
+        #1 $display("RESET executed=%0d", executed);
+`endif
+        repeat (reset_len) @(posedge clk);
+        #1 reset = 0;
+    end
+
     always @(posedge clk) begin
         cycles = cycles + 1;
         if (loaded ? cycles > load_cycles + steps * STEP_CYCLES + 1000
@@ -134,14 +151,7 @@ module tb_computer;
             if (trace_fd) $fdisplay(trace_fd, "%04x %04x %04x", pc_before, dbg_a, dbg_d);
             executed = executed + 1;
             if (executed == kbd_at) keyboard = kbd_val;
-            // Reset RESET_DELAY cycles after this instruction, for RESET_LEN cycles,
-            // so a test can land it in the fetch or execute phase
-            if (executed == reset_at) begin
-                repeat (reset_delay) @(posedge clk);
-                #1 reset = 1;
-                repeat (reset_len) @(posedge clk);
-                #1 reset = 0;
-            end
+            if (executed == reset_at) -> reset_go;
             if (executed == steps) begin
                 if ($test$plusargs("CLEAR")) clear_run;
                 else finish_run;

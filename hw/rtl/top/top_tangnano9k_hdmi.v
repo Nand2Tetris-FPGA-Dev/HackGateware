@@ -45,16 +45,16 @@ module top (
     reset_sync #(.DEBOUNCE(1)) s2_sync (.clk(clk), .async_in(~btn_s2), .sync_out(s2_pressed));
 
     // PSRAM
-    wire req_valid, req_ready, req_we, rsp_valid, init_done;
+    wire req_valid, req_ready, req_we, req_burst, rsp_valid, rsp_word, init_done;
     wire [23:0] req_addr;
     wire [31:0] req_wdata, rsp_rdata;
     wire [3:0] req_wstrb;
 
     psram_ctrl #(.CLK_HZ(27_000_000)) psram (
         .clk(clk), .rst_n(~por),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(1'b0),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(req_burst),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
-        .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done),
+        .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata), .init_done(init_done),
         .O_psram_ck(O_psram_ck), .O_psram_ck_n(O_psram_ck_n),
         .O_psram_cs_n(O_psram_cs_n), .O_psram_reset_n(O_psram_reset_n),
         .IO_psram_dq(IO_psram_dq), .IO_psram_rwds(IO_psram_rwds)
@@ -90,9 +90,9 @@ module top (
         .clk(clk), .por_n(~por), .s1(s1_pressed), .s2(s2_pressed), .keyboard(keyboard),
         .flash_clk(flash_clk), .flash_cs_n(flash_cs_n),
         .flash_mosi(flash_mosi), .flash_miso(flash_miso),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(req_burst),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
-        .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata), .init_done(init_done),
+        .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata), .init_done(init_done),
         .vclk(clk_pix), .vaddr(vaddr), .vdata(vdata),
         .busy(busy), .running(running), .err_header(err_header), .err_crc(err_crc),
         .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),

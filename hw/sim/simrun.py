@@ -60,6 +60,8 @@ class SimResult:
     screen: list[int]
     cycles: int
     clear_cycles: int | None = None
+    reset_executed: int | None = None  # instructions run before the reset
+    read_in_flight: bool | None = None  # at the reset, psram only
 
 
 def long_loop(blocks: int = 40) -> list[int]:
@@ -125,6 +127,7 @@ def run_computer(
         if not done or "FAIL" in out:
             raise SimError(out)
         cleared = re.search(r"CLEARED (\d+)", out)
+        pressed = re.search(r"RESET executed=(\d+)(?: read_in_flight=(\d))?", out)
         lines = (work / "trace.txt").read_text().splitlines() if trace else []
         return SimResult(
             trace=[tuple(int(f, 16) for f in line.split()) for line in lines],
@@ -132,4 +135,6 @@ def run_computer(
             screen=_read_words(work / "screen.txt"),
             cycles=int(done.group(1)),
             clear_cycles=int(cleared.group(1)) if cleared else None,
+            reset_executed=int(pressed.group(1)) if pressed else None,
+            read_in_flight=pressed.group(2) == "1" if pressed and pressed.group(2) else None,
         )

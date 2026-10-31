@@ -32,8 +32,11 @@ def golden(rom, steps, ram_init=None, keyboard=(), reset_at=None):
 
 def assert_matches(rom, steps, **kwargs):
     sim = run_computer(rom, steps, **kwargs)
+    # The emulator resets where the RTL did: instructions can run during reset_delay
     trace, ram, screen = golden(rom, steps, kwargs.get("ram_init"), kwargs.get("keyboard") or (),
-                                kwargs.get("reset_at"))
+                                sim.reset_executed)
+    if kwargs.get("reset_at") is not None:
+        assert sim.reset_executed >= kwargs["reset_at"]
     assert len(sim.trace) == steps
     for i, (got, want) in enumerate(zip(sim.trace, trace)):
         assert got == want, f"step {i}: rtl {got} != emulator {want}"
@@ -99,11 +102,25 @@ def test_short_reset_during_fetch():
     assert sim.trace[500:] == HackMachine(rom).run(2500)
 
 
-@pytest.mark.parametrize("delay,length", [(0, 40), (3, 1), (10, 1), (30, 2)])
-def test_reset_during_psram_fetch(delay, length):
-    # S1 resets the CPU alone; the PSRAM read in flight is waited out and dropped
-    assert_matches(long_loop(), 3000, reset_at=500, reset_delay=delay, reset_len=length,
-                   progmem="psram")
+@pytest.mark.parametrize("at,delay,length", [
+    (512, 3, 1),    # waiting for word 0 of block 16: that fetch is waited out, dropped
+    (512, 10, 1),
+    (512, 30, 2),
+    (513, 0, 40),   # mid-burst, held past its end
+    (512, 45, 1),   # mid-burst, CPU running from the filling block
+    (512, 60, 2),
+])
+def test_reset_during_psram_fetch(at, delay, length):
+    # S1 resets the CPU alone. Mid-burst, the burst still fills its slot and PC 0
+    # misses behind it (block 0 was evicted).
+    sim = assert_matches(long_loop(), 3000, reset_at=at, reset_delay=delay, reset_len=length,
+                         progmem="psram")
+    assert sim.read_in_flight
+
+
+def test_long_loop_cosim_psram():
+    # 40 blocks through 16 slots: round-robin evicts blocks still in use
+    assert_matches(long_loop(), 6000, progmem="psram")
 
 
 def test_long_loop_shape():

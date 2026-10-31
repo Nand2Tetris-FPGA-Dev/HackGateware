@@ -27,10 +27,12 @@ module flash_boot_system #(
     output wire        req_valid,
     input  wire        req_ready,
     output wire        req_we,
+    output wire        req_burst,
     output wire [23:0] req_addr,
     output wire [31:0] req_wdata,
     output wire [3:0]  req_wstrb,
     input  wire        rsp_valid,
+    input  wire        rsp_word,
     input  wire [31:0] rsp_rdata,
     input  wire        init_done,
     input  wire        vclk,
@@ -153,9 +155,9 @@ module flash_boot_system #(
         .fetch_req(pm_req), .fetch_addr(pm_addr), .fetch_ready(pm_ready), .fetch_data(pm_data),
         .load_valid(load_valid), .load_ready(load_ready), .load_addr(load_addr),
         .load_data(load_data), .load_strb(load_strb),
-        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we),
+        .req_valid(req_valid), .req_ready(req_ready), .req_we(req_we), .req_burst(req_burst),
         .req_addr(req_addr), .req_wdata(req_wdata), .req_wstrb(req_wstrb),
-        .rsp_valid(rsp_valid), .rsp_rdata(rsp_rdata)
+        .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata)
     );
 
     hack_computer computer (
