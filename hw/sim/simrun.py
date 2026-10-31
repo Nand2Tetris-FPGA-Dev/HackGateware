@@ -4,6 +4,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from hacktools.assembler import assemble
+
 
 class SimError(Exception):
     pass
@@ -58,6 +60,13 @@ class SimResult:
     screen: list[int]
     cycles: int
     clear_cycles: int | None = None
+
+
+def long_loop(blocks: int = 40) -> list[int]:
+    """A loop of blocks * 32 - 2 instructions with one jump at the end, so every
+    pass fetches every block. Each pass leaves blocks * 8 - 2 in RAM[16]."""
+    body = "".join(f"@{k}\nD=A\n@16\nM=D\n" for k in range(blocks * 8 - 1))
+    return assemble(f"(LOOP)\n{body}@LOOP\n0;JMP\n")
 
 
 def _read_words(path: Path) -> list[int]:

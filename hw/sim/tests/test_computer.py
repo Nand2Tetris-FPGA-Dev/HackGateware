@@ -6,7 +6,7 @@ from hacktools.assembler import assemble
 from hacktools.emulator import HackMachine
 from hacktools.vmtranslator import translate
 
-from simrun import run_computer
+from simrun import long_loop, run_computer
 
 PROGRAMS = Path(__file__).resolve().parents[3] / "sw" / "tests"
 
@@ -102,10 +102,16 @@ def test_short_reset_during_fetch():
 @pytest.mark.parametrize("delay,length", [(0, 40), (3, 1), (10, 1), (30, 2)])
 def test_reset_during_psram_fetch(delay, length):
     # S1 resets the CPU alone; the PSRAM read in flight is waited out and dropped
-    rom = program("screen_pattern")
-    sim = run_computer(rom, 3000, reset_at=500, reset_delay=delay, reset_len=length,
-                       progmem="psram")
-    assert sim.trace[500:] == HackMachine(rom).run(2500)
+    assert_matches(long_loop(), 3000, reset_at=500, reset_delay=delay, reset_len=length,
+                   progmem="psram")
+
+
+def test_long_loop_shape():
+    rom = long_loop()
+    assert len(rom) == 1278
+    m = HackMachine(rom)
+    m.run(1278)
+    assert (m.pc, m.ram[16]) == (0, 318)
 
 
 def test_short_reset_during_execute():
