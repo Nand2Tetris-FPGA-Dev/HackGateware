@@ -1,7 +1,7 @@
 import re
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from hacktools.assembler import assemble
@@ -62,6 +62,8 @@ class SimResult:
     clear_cycles: int | None = None
     reset_executed: int | None = None  # instructions run before the reset
     read_in_flight: bool | None = None  # at the reset, psram only
+    reads: list[tuple[int, str, int, list[int]]] = field(default_factory=list)
+    starts: list[int] = field(default_factory=list)  # fetch_start cycles, with gap only
 
 
 def long_loop(blocks: int = 40) -> list[int]:
@@ -87,12 +89,20 @@ def run_computer(
     reset_delay: int = 0,
     reset_len: int = 2,
     clear: bool = False,
+    debug: list[tuple] | None = None,
+    gap: int = 0,
 ) -> SimResult:
     """Run the RTL computer for `steps` instructions. keyboard takes at most one
     (step, value) pair, applied before that step. progmem is "sim" (progmem_sim
     with pm_latency), "rom" (the board's progmem_rom) or "psram" (progmem_psram
     on psram_host_model, loaded through its load port). cycles counts from the
-    end of loading to the last instruction."""
+    end of loading to the last instruction.
+
+    debug items are ("pause", at, cycles), ("mread", at, addr, count) or
+    ("pread", at, addr, count). After instruction `at` the testbench holds
+    fetch_en low for `cycles` and queues the reads, which run one at a time
+    through the debug ports, overlapping the run if they outlast the pause.
+    gap is a minimum spacing between fetch_starts, as debug_unit's speed."""
     if keyboard and len(keyboard) > 1:
         raise ValueError("run_computer supports one keyboard change")
     with tempfile.TemporaryDirectory() as tmp:
@@ -114,6 +124,20 @@ def run_computer(
             plusargs["TRACE"] = "1"
         if clear:
             plusargs["CLEAR"] = "1"
+        if debug:
+            kinds = {"pause": 0, "mread": 1, "pread": 2}
+            items = sorted(debug, key=lambda d: d[1])
+            (work / "debug.txt").write_text(
+                "".join(f"{kinds[d[0]]} {d[1]} {d[2]} {d[3] if len(d) > 3 else 0}\n"
+                        for d in items)
+            )
+            plusargs["DEBUG_ITEMS"] = str(len(items))
+            pauses = sum(d[2] for d in items if d[0] == "pause")
+            words = sum(d[3] for d in items if d[0] != "pause")
+            plusargs["EXTRA_CYCLES"] = str(pauses + 120 * words)
+        if gap:
+            plusargs["GAP"] = str(gap)
+            plusargs["EXTRA_CYCLES"] = str(int(plusargs.get("EXTRA_CYCLES", 0)) + gap * steps)
         defines = {"PM_LATENCY": str(pm_latency)}
         if progmem == "rom":
             defines.update({"PROGMEM_ROM": "1", "ROM_HEX": '"rom.hex"'})
@@ -128,6 +152,10 @@ def run_computer(
             raise SimError(out)
         cleared = re.search(r"CLEARED (\d+)", out)
         pressed = re.search(r"RESET executed=(\d+)(?: read_in_flight=(\d))?", out)
+        reads: dict[int, tuple[int, str, int, list[int]]] = {}
+        for n, kind, at, addr, word in re.findall(
+                r"READ (\d+) ([mp]) (\d+) (\d+) ([0-9a-f]{4})", out):
+            reads.setdefault(int(n), (int(at), kind, int(addr), []))[3].append(int(word, 16))
         lines = (work / "trace.txt").read_text().splitlines() if trace else []
         return SimResult(
             trace=[tuple(int(f, 16) for f in line.split()) for line in lines],
@@ -137,4 +165,6 @@ def run_computer(
             clear_cycles=int(cleared.group(1)) if cleared else None,
             reset_executed=int(pressed.group(1)) if pressed else None,
             read_in_flight=pressed.group(2) == "1" if pressed and pressed.group(2) else None,
+            reads=[reads[n] for n in sorted(reads)],
+            starts=[int(c) for c in re.findall(r"START (\d+)", out)],
         )
