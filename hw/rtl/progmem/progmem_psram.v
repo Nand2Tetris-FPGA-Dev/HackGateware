@@ -24,7 +24,7 @@
 // rst_n falls never gets fetch_ready, so the CPU's own reset (S1) must not
 // reset this module.
 module progmem_psram #(
-    parameter BLOCKS = 16       // power of two, 2-16
+    parameter BLOCKS = 8        // power of two, 2-16; 16 overfills the GW1NR-9 LUTs
 ) (
     input  wire        clk,
     input  wire        rst_n,

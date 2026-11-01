@@ -12,7 +12,7 @@
 //   5 load, with progmem_psram held in reset for its first `delay` cycles
 //   6 fetch faddr, plus a load raised `delay` cycles after fetch_req
 //   f end
-// The first op starts right after reset, before init_done.
+// The first op starts right after reset, before init_done. BLOCKS is a define.
 // Prints FETCH, LOAD, ORDER, REQ and RSP lines and a RESULT line. at= is the
 // cycle a signal was high in, counted the same way on every line.
 module tb_progmem_psram;
@@ -33,7 +33,7 @@ module tb_progmem_psram;
     wire [31:0] req_wdata, rsp_rdata;
     wire [3:0] req_wstrb;
 
-    progmem_psram dut (
+    progmem_psram #(.BLOCKS(`BLOCKS)) dut (
         .clk(clk), .rst_n(rst_n & pm_rst_n),
         .fetch_req(fetch_req), .fetch_addr(fetch_addr),
         .fetch_ready(fetch_ready), .fetch_data(fetch_data),

@@ -12,6 +12,8 @@ MODEL = HW / "third_party/psram_controller/sim/model"
 WRITE_LAT = 34
 MISS = 33  # word 0 of the burst is sampled at 32, then answered from the buffer
 IDLE = 40  # a burst ends 65 cycles after its request, so after a miss this lets it finish
+RTL = (HW / "rtl/progmem/progmem_psram.v").read_text()
+BLOCKS = int(re.search(r"parameter BLOCKS = (\d+)", RTL).group(1))
 
 pytestmark = pytest.mark.requires_iverilog
 
@@ -64,7 +66,7 @@ def load_words(words, base=0):
     return ops
 
 
-def _run(tmp_path, ops, real=False):
+def _run(tmp_path, ops, real=False, blocks=BLOCKS):
     (tmp_path / "ops.hex").write_text("\n".join(ops + ["f" + "0" * 19]) + "\n")
     sources = [HW / "sim/tb/tb_progmem_psram.v", HW / "rtl/progmem/progmem_psram.v"]
     if real:
@@ -72,8 +74,8 @@ def _run(tmp_path, ops, real=False):
                     MODEL / "w955d8mbya_model.sv"]
     else:
         sources += [HW / "sim/models/psram_host_model.v"]
-    out = iverilog(sources, "tb_progmem_psram", defines={"REAL_CTRL": "1"} if real else None,
-                   cwd=tmp_path)
+    defines = {"BLOCKS": str(blocks)} | ({"REAL_CTRL": "1"} if real else {})
+    out = iverilog(sources, "tb_progmem_psram", defines=defines, cwd=tmp_path)
     m = re.search(r"RESULT (.*)", out)
     assert m and "ERROR" not in out and "TIMEOUT" not in out and "FAIL" not in out, out
     result = {k: int(v) for k, v in (f.split("=") for f in m.group(1).split())}
@@ -158,24 +160,27 @@ def test_miss_during_fill_waits_for_burst(tmp_path):
     assert run.fetches[1].at == second.at + MISS
 
 
-def test_sixteen_blocks_then_round_robin(tmp_path):
-    data = [0x1000 + b for b in range(17)]
-    ops = [load(32 * b, data[b]) for b in range(17)]
-    for b in range(16):
+@pytest.mark.parametrize("n", sorted({BLOCKS, 16}))
+def test_all_blocks_then_round_robin(tmp_path, n):
+    data = [0x1000 + b for b in range(n + 1)]
+    ops = [load(32 * b, data[b]) for b in range(n + 1)]
+    for b in range(n):
         ops += [fetch(32 * b), idle(IDLE)]
-    ops += [fetch(32 * b) for b in range(16)]
-    ops += [fetch(32 * 16), idle(IDLE), fetch(32), fetch(0), idle(IDLE), fetch(32)]
-    run = _run(tmp_path, ops)
-    blocks = list(range(16)) * 2 + [16, 1, 0, 1]
+    ops += [fetch(32 * b) for b in range(n)]
+    ops += [fetch(32 * n), idle(IDLE), fetch(32), fetch(0), idle(IDLE), fetch(32)]
+    run = _run(tmp_path, ops, blocks=n)
+    blocks = list(range(n)) * 2 + [n, 1, 0, 1]
     assert [(f.addr, f.data) for f in run.fetches] == [(32 * b, data[b]) for b in blocks]
-    # Block 16 evicts slot 0 (block 0), and block 0 then evicts slot 1 (block 1)
-    assert [f.lat for f in run.fetches] == [MISS] * 16 + [0] * 16 + [MISS, 0, MISS, MISS]
+    # Block n evicts slot 0 (block 0), and block 0 then evicts slot 1 (block 1)
+    assert [f.lat for f in run.fetches] == [MISS] * n + [0] * n + [MISS, 0, MISS, MISS]
 
 
-def test_block_tag_uses_every_address_bit(tmp_path):
+# Five tag bits per run, so base, its five far blocks and the top block fit in 8 slots
+@pytest.mark.parametrize("bits", [range(5, 10), range(10, 15)], ids=["bits5-9", "bits10-14"])
+def test_block_tag_uses_every_address_bit(tmp_path, bits):
     base = 0b010_1010_1010_1010
     near = [base ^ (1 << b) for b in range(5)]      # same block as base
-    far = [base ^ (1 << b) for b in range(5, 15)]   # one other block per tag bit
+    far = [base ^ (1 << b) for b in bits]           # one other block per tag bit
     words = _words(32, seed=13)
     top = _words(32, seed=14)                       # 32736-32767: every tag bit set
     ops = load_words(words, base & ~31) + load_words(top, 32736)
@@ -192,7 +197,7 @@ def test_block_tag_uses_every_address_bit(tmp_path):
     want += [(a, words[a & 31]) for a in near]
     want += [(32767, top[31]), (32736, top[0]), (base, words[base & 31])]
     assert [(f.addr, f.data) for f in run.fetches] == want
-    assert [f.lat for f in run.fetches] == [MISS] * 11 + [0] * 5 + [MISS, 0, 0]
+    assert [f.lat for f in run.fetches] == [MISS] * (1 + len(far)) + [0] * 5 + [MISS, 0, 0]
 
 
 def test_load_invalidates_all_blocks(tmp_path):

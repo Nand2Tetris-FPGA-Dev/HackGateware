@@ -77,7 +77,9 @@ def test_runs_from_board_rom():
 
 def test_computer_with_psram_model():
     sim = assert_matches(program("screen_pattern"), 400_000, progmem="psram")
-    print(f"screen_pattern on psram: {sim.cycles / 400_000:.2f} cycles per instruction")
+    cpi = sim.cycles / 400_000
+    print(f"screen_pattern on psram: {cpi:.2f} cycles per instruction")
+    assert cpi < 2.2  # buffered hits take 2 cycles; the loop fits in the buffer
 
 
 def test_latency_independent():
@@ -141,6 +143,15 @@ def test_short_reset_during_execute():
 def test_book_pong_asm():
     pong = Path(os.environ["N2T_PROJECTS"]) / "6" / "pong" / "Pong.asm"
     assert_matches(assemble(pong.read_text()), 200_000)
+
+
+@pytest.mark.requires_env("N2T_PROJECTS")
+def test_pong_slice_cpi_psram():
+    pong = Path(os.environ["N2T_PROJECTS"]) / "6" / "pong" / "Pong.asm"
+    sim = assert_matches(assemble(pong.read_text()), 200_000, progmem="psram")
+    cpi = sim.cycles / 200_000
+    print(f"Pong on psram: {cpi:.2f} cycles per instruction")
+    assert cpi < 2.8  # misses cost a 33-cycle burst; fetch model gives 2.54
 
 
 # The book's projects/8/FunctionCalls/FibonacciElement, computing fib(10)
