@@ -1,7 +1,9 @@
 // CPU + data memory with a fetch/execute sequencer.
 //
-// FETCH: request the instruction at PC and wait for pm_ready. RAM reads are
-// registered, so this also gives inM a cycle to settle on the current A.
+// FETCH: request the instruction at PC and wait for pm_ready, which may come in
+// the request cycle itself (REQ goes straight to EXEC). RAM reads are
+// registered and A changed at the previous EXEC edge, so the request cycle
+// still gives inM a cycle to settle on the current A.
 // EXEC: one cycle with ce high; A, D, PC and any M write update on its edge.
 //
 // pm_req is a one cycle pulse, and only one request is outstanding at a time.
@@ -85,7 +87,15 @@ module hack_computer (
 
     always @(posedge clk) begin
         case (state)
-            REQ:  if (!hold) state <= WAIT;
+            REQ:  if (!hold) begin
+                      if (pm_ready) begin
+                          dbg_instr <= pm_data;
+                          dbg_pc <= pc;
+                          state <= EXEC;
+                      end else begin
+                          state <= WAIT;
+                      end
+                  end
             WAIT: if (pm_ready) begin
                       dbg_instr <= pm_data;
                       dbg_pc <= pc;

@@ -8,7 +8,7 @@ from hacktools.assembler import assemble
 from hacktools.emulator import HackMachine
 from hacktools.image import build_image
 
-from simrun import iverilog
+from simrun import iverilog, long_loop
 
 HW = Path(__file__).resolve().parents[2]
 PROGRAMS = HW.parent / "sw" / "tests"
@@ -144,15 +144,17 @@ def test_bad_crc(tmp_path):
 
 
 @pytest.mark.parametrize("at,wait_for,delay", [
-    (1, EXEC, 0),     # line 0 of the old program is in the line buffer
+    (1, EXEC, 0),     # block 0 of the old program is in the buffer
     (500, EXEC, 0),
     (500, IDLE, 0),   # no PSRAM read out
     (500, READ, 0),   # PSRAM read just taken
     (500, READ, 17),
-    (500, READ, 34),  # the read's response edge
-], ids=["line0", "exec", "idle", "read0", "read17", "read34"])
+    (500, READ, 32),  # the burst's first word
+    (500, READ, 48),  # mid-burst
+    (500, READ, 64),  # the burst's response edge
+], ids=["line0", "exec", "idle", "read0", "read17", "read32", "read48", "read64"])
 def test_s2_reloads_mid_run(tmp_path, at, wait_for, delay):
-    old, new = program("screen_pattern"), program("fill")
+    old, new = long_loop(), program("fill")
     run = run_boot(tmp_path, build_image(old, "old"), 3000, build_image(new, "new"),
                    press=(S2, at, wait_for, delay, 3))
     r = run.result
@@ -176,10 +178,11 @@ def test_s2_during_load(tmp_path):
     assert_runs(run.segments[0], new, HackMachine(new))
 
 
-@pytest.mark.parametrize("at,wait_for,delay", [(500, EXEC, 0), (500, IDLE, 0), (500, READ, 10)],
-                         ids=["exec", "idle", "read10"])
+@pytest.mark.parametrize("at,wait_for,delay",
+                         [(500, EXEC, 0), (500, IDLE, 0), (500, READ, 10), (500, READ, 48)],
+                         ids=["exec", "idle", "read10", "read48"])
 def test_s1_restarts_without_reload(tmp_path, at, wait_for, delay):
-    rom = program("screen_pattern")
+    rom = long_loop()
     run = run_boot(tmp_path, build_image(rom, "pattern"), 3000,
                    press=(S1, at, wait_for, delay, 3))
     r = run.result

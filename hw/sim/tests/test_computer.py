@@ -6,7 +6,7 @@ from hacktools.assembler import assemble
 from hacktools.emulator import HackMachine
 from hacktools.vmtranslator import translate
 
-from simrun import run_computer
+from simrun import long_loop, run_computer
 
 PROGRAMS = Path(__file__).resolve().parents[3] / "sw" / "tests"
 
@@ -32,8 +32,11 @@ def golden(rom, steps, ram_init=None, keyboard=(), reset_at=None):
 
 def assert_matches(rom, steps, **kwargs):
     sim = run_computer(rom, steps, **kwargs)
+    # The emulator resets where the RTL did: instructions can run during reset_delay
     trace, ram, screen = golden(rom, steps, kwargs.get("ram_init"), kwargs.get("keyboard") or (),
-                                kwargs.get("reset_at"))
+                                sim.reset_executed)
+    if kwargs.get("reset_at") is not None:
+        assert sim.reset_executed >= kwargs["reset_at"]
     assert len(sim.trace) == steps
     for i, (got, want) in enumerate(zip(sim.trace, trace)):
         assert got == want, f"step {i}: rtl {got} != emulator {want}"
@@ -74,7 +77,9 @@ def test_runs_from_board_rom():
 
 def test_computer_with_psram_model():
     sim = assert_matches(program("screen_pattern"), 400_000, progmem="psram")
-    print(f"screen_pattern on psram: {sim.cycles / 400_000:.2f} cycles per instruction")
+    cpi = sim.cycles / 400_000
+    print(f"screen_pattern on psram: {cpi:.2f} cycles per instruction")
+    assert cpi < 2.2  # buffered hits take 2 cycles; the loop fits in the buffer
 
 
 def test_latency_independent():
@@ -99,13 +104,33 @@ def test_short_reset_during_fetch():
     assert sim.trace[500:] == HackMachine(rom).run(2500)
 
 
-@pytest.mark.parametrize("delay,length", [(0, 40), (3, 1), (10, 1), (30, 2)])
-def test_reset_during_psram_fetch(delay, length):
-    # S1 resets the CPU alone; the PSRAM read in flight is waited out and dropped
-    rom = program("screen_pattern")
-    sim = run_computer(rom, 3000, reset_at=500, reset_delay=delay, reset_len=length,
-                       progmem="psram")
-    assert sim.trace[500:] == HackMachine(rom).run(2500)
+@pytest.mark.parametrize("at,delay,length", [
+    (512, 3, 1),    # waiting for word 0 of block 16: that fetch is waited out, dropped
+    (512, 10, 1),
+    (512, 30, 2),
+    (513, 0, 40),   # mid-burst, held past its end
+    (512, 45, 1),   # mid-burst, CPU running from the filling block
+    (512, 60, 2),
+])
+def test_reset_during_psram_fetch(at, delay, length):
+    # S1 resets the CPU alone. Mid-burst, the burst still fills its slot and PC 0
+    # misses behind it (block 0 was evicted).
+    sim = assert_matches(long_loop(), 3000, reset_at=at, reset_delay=delay, reset_len=length,
+                         progmem="psram")
+    assert sim.read_in_flight
+
+
+def test_long_loop_cosim_psram():
+    # 40 blocks through BLOCKS slots: round-robin evicts blocks still in use
+    assert_matches(long_loop(), 6000, progmem="psram")
+
+
+def test_long_loop_shape():
+    rom = long_loop()
+    assert len(rom) == 1278
+    m = HackMachine(rom)
+    m.run(1278)
+    assert (m.pc, m.ram[16]) == (0, 318)
 
 
 def test_short_reset_during_execute():
@@ -118,6 +143,15 @@ def test_short_reset_during_execute():
 def test_book_pong_asm():
     pong = Path(os.environ["N2T_PROJECTS"]) / "6" / "pong" / "Pong.asm"
     assert_matches(assemble(pong.read_text()), 200_000)
+
+
+@pytest.mark.requires_env("N2T_PROJECTS")
+def test_pong_slice_cpi_psram():
+    pong = Path(os.environ["N2T_PROJECTS"]) / "6" / "pong" / "Pong.asm"
+    sim = assert_matches(assemble(pong.read_text()), 200_000, progmem="psram")
+    cpi = sim.cycles / 200_000
+    print(f"Pong on psram: {cpi:.2f} cycles per instruction")
+    assert cpi < 2.8  # misses cost a 33-cycle burst; fetch model gives 2.54
 
 
 # The book's projects/8/FunctionCalls/FibonacciElement, computing fib(10)
