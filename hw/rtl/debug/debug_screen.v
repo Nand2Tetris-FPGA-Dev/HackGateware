@@ -149,12 +149,12 @@ module debug_screen (
             3'd4: state_name = "NO IMG";
             3'd5: state_name = "BADCRC";
             3'd6: state_name = "WRITE ";
-            default: state_name = "      ";
+            default: state_name = "PAUSE ";
         endcase
     endfunction
     wire [47:0] state_txt = state_name(state_q);
 
-    wire show_name = state_q == 3'd2 || state_q == 3'd3;
+    wire show_name = state_q == 3'd2 || state_q == 3'd3 || state_q == 3'd7;
 
     wire [239:0] line0 = {"HACK  slot ", fmt[0*48 +: 16], "           ", state_txt};
     wire [239:0] line1 = {name_q, " ", fmt[1*48 +: 40], " words  "};

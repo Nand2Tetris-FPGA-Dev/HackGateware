@@ -40,7 +40,11 @@ module tb_debug_system;
         // no flash requests here
         .fl_req(1'b0), .fl_op(3'd0), .fl_addr(24'd0), .fl_len(24'd0),
         .pb_we(1'b0), .pb_addr(8'd0), .pb_data(8'd0),
-        .fl_busy(), .fl_rsp(), .fl_status(), .fl_crc()
+        .fl_busy(), .fl_rsp(), .fl_status(), .fl_crc(),
+        .dbg_cmd(1'b0), .dbg_op(3'd0), .dbg_seq(8'd0), .dbg_gap(25'd0), .cmd_done(),
+        .rd(1'b0), .rd_rom(1'b0), .rd_addr(15'd0), .rd_count(7'd0), .rd_word_valid(),
+        .rd_word(), .rd_end(), .rd_refused(), .paused(), .gap(), .step_seq(), .next_pc(),
+        .link_lost(1'b0)
     );
 
     spi_flash_model #(.HEXFILE("flash.hex"), .SIZE(262144)) flash (

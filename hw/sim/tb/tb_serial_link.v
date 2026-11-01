@@ -8,6 +8,10 @@
 // snapshot (dut.latch), so a late read shows up. +TAIL: cycles to run after END.
 // A flash stub answers fl_req +FL_WAIT cycles later with +FL_STATUS and +FL_CRC
 // (hex), busy until then; prints FLREQ per request and PB per page buffer write.
+// A debug unit stub: cmd_done +DONE_WAIT cycles after dbg_cmd; a read gives
+// word addr ^ 16'hA5A5 every +RD_SPACE cycles, or after +REFUSE=n words ends
+// refused. paused, gap, step_seq, next_pc from plusargs. Prints DBG per
+// command, CMDDONE, RD per read, RDEND, and LOST on each link_lost change.
 `ifndef CLKS_PER_BIT
 `define CLKS_PER_BIT 9
 `endif
@@ -41,6 +45,23 @@ module tb_serial_link;
     reg [31:0] fl_crc = 0;
     integer fl_wait, fl_left = 0;
 
+    reg paused = 0;
+    reg [24:0] gap = 0;
+    reg [7:0] step_seq = 0;
+    reg [14:0] next_pc = 0;
+    wire dbg_cmd, rd, rd_rom, link_lost;
+    wire [2:0] dbg_op;
+    wire [7:0] dbg_seq;
+    wire [24:0] dbg_gap;
+    wire [14:0] rd_addr;
+    wire [6:0] rd_count;
+    reg cmd_done = 0, rd_word_valid = 0, rd_end = 0, rd_refused = 0;
+    reg [15:0] rd_word = 0;
+    integer done_wait, done_left = -1, rd_space, refuse, rd_left = 0, rd_wait = 0, rd_n = 0;
+    reg [14:0] rd_at = 0;
+    reg [2:0] last_op = 0;
+    reg [7:0] last_seq = 0;
+
     serial_link #(
         .CLKS_PER_BIT(CPB), .WATCHDOG_CYCLES(`WATCHDOG), .BAD_MAX(`BAD_MAX)
     ) dut (
@@ -49,8 +70,72 @@ module tb_serial_link;
         .sp_max(sp_max), .heap_hi(heap_hi), .prog_words(prog_words), .prog_name(prog_name),
         .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
         .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
-        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc),
+        .dbg_cmd(dbg_cmd), .dbg_op(dbg_op), .dbg_seq(dbg_seq), .dbg_gap(dbg_gap),
+        .rd(rd), .rd_rom(rd_rom), .rd_addr(rd_addr), .rd_count(rd_count),
+        .link_lost(link_lost), .cmd_done(cmd_done), .rd_word_valid(rd_word_valid),
+        .rd_word(rd_word), .rd_end(rd_end), .rd_refused(rd_refused),
+        .paused(paused), .gap(gap), .step_seq(step_seq), .next_pc(next_pc)
     );
+
+    always @(posedge clk) begin
+        cmd_done <= 0;
+        if (dbg_cmd) begin
+            $display("DBG %0d %0d %0d %0d", dbg_op, dbg_seq, dbg_gap, cycle);
+            if (done_left >= 0) $display("CMDBUSY %0d", cycle);
+            done_left <= done_wait;
+            last_op <= dbg_op;
+            last_seq <= dbg_seq;
+        end else if (done_left == 0) begin
+            cmd_done <= 1;
+            if (last_op == 2) step_seq <= last_seq;     // as debug_unit does on a STEP
+            done_left <= -1;
+            $display("CMDDONE %0d", cycle);
+        end else if (done_left > 0) begin
+            done_left <= done_left - 1;
+        end
+    end
+
+    always @(posedge clk) begin
+        rd_word_valid <= 0;
+        rd_end <= 0;
+        rd_refused <= 0;
+        if (rd) begin
+            $display("RD %0d %0d %0d %0d", rd_rom, rd_addr, rd_count, cycle);
+            if (rd_left != 0) $display("RDBUSY %0d", cycle);
+            rd_at <= rd_addr;
+            rd_left <= rd_count;
+            rd_n <= 0;
+            rd_wait <= rd_space;
+        end else if (rd_left > 0) begin
+            if (rd_wait > 0) begin
+                rd_wait <= rd_wait - 1;
+            end else if (rd_n == refuse) begin
+                rd_end <= 1;
+                rd_refused <= 1;
+                rd_left <= 0;
+                $display("RDEND 1 %0d", cycle);
+            end else begin
+                rd_word <= {1'b0, rd_at} ^ 16'hA5A5;
+                rd_word_valid <= 1;
+                rd_at <= rd_at + 1;
+                rd_n <= rd_n + 1;
+                rd_left <= rd_left == 1 ? -1 : rd_left - 1;   // -1: end next cycle
+                rd_wait <= rd_space;
+            end
+        end else if (rd_left == -1) begin
+            rd_end <= 1;
+            rd_left <= 0;
+            $display("RDEND 0 %0d", cycle);
+        end
+    end
+
+    reg lost_seen = 0;
+    always @(negedge clk)
+        if (link_lost !== lost_seen) begin
+            $display("LOST %0d %0d", cycle, link_lost);
+            lost_seen = link_lost;
+        end
 
     always @(posedge clk) begin
         fl_rsp <= 0;
@@ -104,6 +189,10 @@ module tb_serial_link;
             heap_hi = ~heap_hi;
             prog_words = ~prog_words;
             prog_name = ~prog_name;
+            paused = ~paused;
+            gap = ~gap;
+            step_seq = ~step_seq;
+            next_pc = ~next_pc;
         end
 
     task send_byte(input [7:0] value);
@@ -138,6 +227,13 @@ module tb_serial_link;
         if (!$value$plusargs("FL_WAIT=%d", fl_wait)) fl_wait = 0;
         if (!$value$plusargs("FL_STATUS=%h", fl_status)) fl_status = 0;
         if (!$value$plusargs("FL_CRC=%h", fl_crc)) fl_crc = 0;
+        if (!$value$plusargs("PAUSED=%h", paused)) paused = 0;
+        if (!$value$plusargs("GAP=%h", gap)) gap = 0;
+        if (!$value$plusargs("SEQ=%h", step_seq)) step_seq = 0;
+        if (!$value$plusargs("NEXT_PC=%h", next_pc)) next_pc = 0;
+        if (!$value$plusargs("DONE_WAIT=%d", done_wait)) done_wait = 0;
+        if (!$value$plusargs("RD_SPACE=%d", rd_space)) rd_space = 0;
+        if (!$value$plusargs("REFUSE=%d", refuse)) refuse = -1;
         repeat (4) @(negedge clk);
         rst = 0;
         repeat (4 * CPB) @(negedge clk);

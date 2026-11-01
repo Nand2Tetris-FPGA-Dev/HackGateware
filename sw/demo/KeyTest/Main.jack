@@ -80,7 +80,7 @@ class Main {
             return;
         }
         do Output.moveCursor(1, 30);
-        do Main.number(presses, 0);
+        do Main.number(presses, 5);
         return;
     }
 

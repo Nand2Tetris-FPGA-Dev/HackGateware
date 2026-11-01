@@ -63,6 +63,7 @@ def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False, fl=None
     sources = [HW / "sim/tb/tb_flash_boot.v", HW / "rtl/top/flash_boot_system.v",
                HW / "sim/models/spi_flash_model.v", HW / "rtl/io/spi_flash_reader.v",
                HW / "rtl/io/boot_loader.v", HW / "rtl/debug/hack_stats.v",
+               HW / "rtl/debug/debug_unit.v",
                HW / "rtl/io/flash_session.v", HW / "rtl/io/spi_flash_writer.v",
                HW / "rtl/progmem/progmem_psram.v",
                HW / "rtl/top/hack_computer.v", HW / "rtl/cpu/hack_cpu.v",

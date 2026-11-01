@@ -52,7 +52,11 @@ module tb_flash_boot;
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi),
         .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
         .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
-        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc),
+        .dbg_cmd(1'b0), .dbg_op(3'd0), .dbg_seq(8'd0), .dbg_gap(25'd0), .cmd_done(),
+        .rd(1'b0), .rd_rom(1'b0), .rd_addr(15'd0), .rd_count(7'd0), .rd_word_valid(),
+        .rd_word(), .rd_end(), .rd_refused(), .paused(), .gap(), .step_seq(), .next_pc(),
+        .link_lost(1'b0)
     );
 
     spi_flash_model #(.HEXFILE("flash.hex"), .SIZE(262144)) flash (

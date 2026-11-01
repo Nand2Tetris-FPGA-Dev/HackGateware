@@ -45,7 +45,10 @@ module top (
         .clk(clk), .reset(cpu_reset), .clear(1'b0), .clearing(),
         .pm_req(pm_req), .pm_addr(pm_addr), .pm_ready(pm_ready), .pm_data(pm_data),
         .keyboard(16'd0), .vclk(clk_pix), .vaddr(vaddr), .vdata(vdata),
-        .dbg_pc(), .dbg_a(), .dbg_d(), .dbg_instr(), .dbg_exec()
+        .dbg_pc(), .dbg_a(), .dbg_d(), .dbg_instr(), .dbg_exec(),
+        .fetch_en(1'b1), .dbg_mreq(1'b0), .dbg_maddr(15'd0), .dbg_mgnt(), .dbg_mdata(),
+        .dbg_preq(1'b0), .dbg_paddr(15'd0), .dbg_pready(), .dbg_pdata(),
+        .fetch_start(), .idle(), .next_pc()
     );
 
     progmem_rom #(.WORDS(2048)) rom (

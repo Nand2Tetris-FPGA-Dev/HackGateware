@@ -1,11 +1,13 @@
 import random
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 from hacktools.link import (
-    BEGIN, CRC, DATA, END, ERASE, HELLO, PROGRAM, crc_payload, data_payload, erase_payload,
-    program_payload,
+    BEGIN, CRC, DATA, DEBUG, END, ERASE, HELLO, OP_PAUSE, OP_RUN, OP_SPEED, OP_STEP, PROGRAM,
+    READ_RAM, READ_ROM, STATUS_DEBUG_LEN, crc_payload, data_payload, debug_payload,
+    erase_payload, gap_for, parse_read, program_payload, read_payload,
 )
 
 from serial_frames import decode_frames, encode_frame, parse_status
@@ -31,7 +33,10 @@ STATUS_ARGS = {
     "BOOT": "boot_state", "PC": "pc", "INSTR": "instr", "A": "a", "D": "d", "SP": "sp",
     "SPMAX": "sp_max", "HEAP": "heap_hi", "WORDS": "prog_words",
 }
-REPLY_BITS = 450        # idle bits that cover the longest reply going out
+DEBUG_STATUS = {"paused": 1, "gap": 0x1ABCDEF, "next_pc": 0x4567, "step_seq": 0x9C}
+DEBUG_ARGS = {"PAUSED": "paused", "GAP": "gap", "NEXT_PC": "next_pc", "SEQ": "step_seq"}
+REPLY_BITS = 600        # idle bits that cover a STATUS reply going out
+READ_BITS = 1500        # and a 64-word READ reply
 
 STATUS_REQ = encode_frame(0x03)
 
@@ -49,6 +54,11 @@ class Run:
     sent: list[int] = field(default_factory=list)
     fl: list[tuple[int, int, int, int]] = field(default_factory=list)  # (op, addr, len, cycle)
     pb: list[tuple[int, int, int]] = field(default_factory=list)       # (addr, data, cycle)
+    dbg: list[tuple[int, int, int, int]] = field(default_factory=list)  # (op, seq, gap, cycle)
+    done: list[int] = field(default_factory=list)
+    rd: list[tuple[int, int, int, int]] = field(default_factory=list)   # (rom, addr, count, cycle)
+    rd_end: list[tuple[int, int]] = field(default_factory=list)         # (refused, cycle)
+    lost: list[tuple[int, int]] = field(default_factory=list)           # (cycle, value)
     ends: list[int] = field(default_factory=list)               # last SENT of each bytes item
     end: int = 0
 
@@ -57,7 +67,7 @@ class Run:
 
 
 def run(tmp_path, items, tail=5000, bad_max=None, flip=False, clks=CLKS_PER_BIT,
-        fl_wait=0, fl_status=0, fl_crc=0):
+        fl_wait=0, fl_status=0, fl_crc=0, done_wait=0, rd_space=0, refuse=None):
     """items: bytes (sent back to back), ("idle", bits) or ("brk", bits)."""
     lines, last_index, idle, count = [], [], 0, 0
     for item in items:
@@ -77,6 +87,10 @@ def run(tmp_path, items, tail=5000, bad_max=None, flip=False, clks=CLKS_PER_BIT,
     plusargs["NAME"] = NAME.hex()
     plusargs["TAIL"] = str(tail)
     plusargs |= {"FL_WAIT": str(fl_wait), "FL_STATUS": f"{fl_status:x}", "FL_CRC": f"{fl_crc:x}"}
+    plusargs |= {k: f"{DEBUG_STATUS[v]:x}" for k, v in DEBUG_ARGS.items()}
+    plusargs |= {"DONE_WAIT": str(done_wait), "RD_SPACE": str(rd_space)}
+    if refuse is not None:
+        plusargs["REFUSE"] = str(refuse)
     if flip:
         plusargs["FLIP"] = "1"
     defines = {"CLKS_PER_BIT": str(clks), "WATCHDOG": str(WATCHDOG)}
@@ -100,14 +114,25 @@ def run(tmp_path, items, tail=5000, bad_max=None, flip=False, clks=CLKS_PER_BIT,
             r.fl.append((int(rest[0]), int(rest[1], 16), int(rest[2]), int(rest[3])))
         elif word == "PB":
             r.pb.append((int(rest[0], 16), int(rest[1], 16), int(rest[2])))
-        elif word in ("TXERR", "FLREQBUSY"):
+        elif word == "DBG":
+            r.dbg.append(tuple(int(x) for x in rest))
+        elif word == "CMDDONE":
+            r.done.append(int(rest[0]))
+        elif word == "RD":
+            r.rd.append(tuple(int(x) for x in rest))
+        elif word == "RDEND":
+            r.rd_end.append((int(rest[0]), int(rest[1])))
+        elif word == "LOST":
+            r.lost.append((int(rest[0]), int(rest[1])))
+        elif word in ("TXERR", "FLREQBUSY", "CMDBUSY", "RDBUSY"):
             pytest.fail(f"testbench error: {line}")
     r.ends = [r.sent[i] for i in last_index]
     return r
 
 
-def status_of(r, index=0):
-    statuses = [p for t, p in r.replies() if t == 0x83]
+def status_of(r, index=0, reply_type=0x83):
+    statuses = [p for t, p in r.replies() if t == reply_type]
+    assert len(statuses[index]) == STATUS_DEBUG_LEN
     return parse_status(statuses[index])
 
 
@@ -360,3 +385,130 @@ def test_flash_frames_feed_watchdog(tmp_path):
     r = run(tmp_path, items)
     assert r.end - r.ends[0] >= 30000
     assert [v for _, v in r.kbd] == [0x41]
+
+
+def debug(op, seq=0, gap=0):
+    return encode_frame(DEBUG, debug_payload(op, seq, gap))
+
+
+def read(addr, count, rom=False):
+    return encode_frame(READ_ROM if rom else READ_RAM, read_payload(addr, count))
+
+
+def raw_read(addr, count):
+    return encode_frame(READ_RAM, struct.pack("<HB", addr, count))
+
+
+def stub_words(addr, count):
+    return [a ^ 0xA5A5 for a in range(addr, addr + count)]
+
+
+def dbg_ops(r):
+    return [(op, seq, gap) for op, seq, gap, _ in r.dbg]
+
+
+def test_status_extended(tmp_path):
+    r = run(tmp_path, [key(0x41), STATUS_REQ, ("idle", REPLY_BITS)], flip=True)
+    s = status_of(r)
+    for name, value in (STATUS | DEBUG_STATUS).items():
+        assert s[name] == value, name
+    assert s["prog_name"] == NAME and s["keyboard"] == 0x41
+
+
+def test_debug_reply_after_done(tmp_path):
+    r = run(tmp_path, [debug(OP_STEP, 9), ("idle", REPLY_BITS + 60),
+                       debug(OP_SPEED, 0, gap_for(1))], done_wait=500, tail=8000)
+    assert dbg_ops(r) == [(OP_STEP, 9, 0), (OP_SPEED, 0, 27_000_000)]
+    assert r.dbg[0][3] <= r.ends[0] + 20
+    replies = r.replies()
+    assert [t for t, _ in replies] == [0x84, 0x84]
+    first = len(encode_frame(*replies[0]))
+    for done, start in zip(r.done, (0, first)):
+        assert r.tx[start][1] >= done + 10 * CLKS_PER_BIT
+    for i in range(2):
+        s = status_of(r, i, 0x84)
+        assert s["pc"] == STATUS["pc"] and s["prog_name"] == NAME
+        assert s["step_seq"] == 9      # the stub sets it on cmd_done
+        assert s["paused"] == 1 and s["gap"] == DEBUG_STATUS["gap"]
+
+
+def test_debug_bad_frames(tmp_path):
+    bad = [
+        debug(5),
+        debug(0xFF, 1, 3),
+        encode_frame(DEBUG, bytes(5)),
+        encode_frame(DEBUG, bytes(7)),
+        encode_frame(DEBUG),
+    ]
+    r = run(tmp_path, bad + [STATUS_REQ, ("idle", REPLY_BITS)])
+    assert r.dbg == []
+    assert [t for t, _ in r.replies()] == [0x83]
+    assert status_of(r)["bad_frames"] == len(bad)
+
+
+def test_read_reply_words(tmp_path):
+    # Words come every cycle; 150..213 holds addr 165, whose low byte is zero.
+    r = run(tmp_path, [read(150, 64), ("idle", READ_BITS), read(7, 3, rom=True),
+                       ("idle", READ_BITS)])
+    assert [x[:3] for x in r.rd] == [(0, 150, 64), (1, 7, 3)]
+    replies = r.replies()
+    assert [t for t, _ in replies] == [0x85, 0x86]
+    assert [len(p) for _, p in replies] == [3 + 128, 3 + 6]
+    assert replies[0][1][2] == 64 and replies[1][1][2] == 3
+    assert parse_read(replies[0][1]) == (150, stub_words(150, 64))
+    assert parse_read(replies[1][1]) == (7, stub_words(7, 3))
+    assert r.rd[0][3] <= r.ends[0] + 20
+
+
+def test_read_bounds(tmp_path):
+    bad = [raw_read(0, 0), raw_read(0, 65), raw_read(32705, 64), raw_read(32767, 2),
+           raw_read(0x8000, 1), raw_read(0xFFFF, 1), encode_frame(READ_ROM, bytes(2))]
+    r = run(tmp_path, bad + [raw_read(32704, 64), ("idle", READ_BITS), raw_read(32767, 1),
+                             ("idle", READ_BITS), STATUS_REQ, ("idle", REPLY_BITS)])
+    assert [x[:3] for x in r.rd] == [(0, 32704, 64), (0, 32767, 1)]
+    assert [t for t, _ in r.replies()] == [0x85, 0x85, 0x83]
+    assert status_of(r)["bad_frames"] == len(bad)
+
+
+@pytest.mark.parametrize("refuse", [0, 5])
+def test_read_refused_reply(tmp_path, refuse):
+    r = run(tmp_path, [read(150, 64), ("idle", READ_BITS)], refuse=refuse)
+    assert [x for x, _ in r.rd_end] == [1]
+    assert r.replies() == [(0x85, struct.pack("<HB", 150, 0))]
+
+
+def test_requests_dropped_while_busy(tmp_path):
+    space = 50
+    read_bits = READ_BITS + 64 * (space + 1) // CLKS_PER_BIT
+    r = run(tmp_path, [
+        read(150, 64), STATUS_REQ, encode_frame(0x02, b"\x11"), debug(OP_RUN),
+        read(0, 1), ("idle", read_bits),
+        debug(OP_PAUSE), read(0, 1), STATUS_REQ, debug(OP_RUN), ("idle", 2000 // CLKS_PER_BIT),
+        ("idle", REPLY_BITS), STATUS_REQ, ("idle", REPLY_BITS),
+    ], rd_space=space, done_wait=2000)
+    assert r.ends[4] < r.rd_end[0][1]
+    assert r.ends[8] < r.done[0]
+    assert [x[:3] for x in r.rd] == [(0, 150, 64)]
+    assert dbg_ops(r) == [(OP_PAUSE, 0, 0)]
+    replies = r.replies()
+    assert [t for t, _ in replies] == [0x85, 0x84, 0x83]
+    assert parse_read(replies[0][1]) == (150, stub_words(150, 64))
+    assert status_of(r)["bad_frames"] == 0
+
+
+def test_key_during_read(tmp_path):
+    r = run(tmp_path, [read(150, 64), key(0x41)], rd_space=50,
+            tail=64 * 51 + READ_BITS * CLKS_PER_BIT)
+    assert [v for _, v in r.kbd] == [0x41]
+    assert r.kbd[0][0] <= r.ends[1] + 3
+    assert r.kbd[0][0] < r.rd_end[0][1]
+    assert parse_read(r.replies()[0][1]) == (150, stub_words(150, 64))
+
+
+def test_link_lost_level(tmp_path):
+    r = run(tmp_path, [key(0x41), ("idle", (WATCHDOG + 2000) // CLKS_PER_BIT), debug(5),
+                       ("idle", 50), debug(OP_RUN), ("idle", REPLY_BITS)])
+    assert [v for _, v in r.lost] == [1, 0]
+    assert abs(r.lost[0][0] - r.ends[0] - WATCHDOG) <= 100
+    assert r.ends[1] < r.lost[1][0] <= r.ends[2] + 12
+    assert dbg_ops(r) == [(OP_RUN, 0, 0)]

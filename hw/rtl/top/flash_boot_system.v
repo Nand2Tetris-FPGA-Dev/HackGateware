@@ -12,6 +12,10 @@
 // fl_* and pb_* carry the serial link's flash requests to flash_session. A
 // session holds the loader and CPU (s1 and s2 do nothing more until it ends);
 // when it ends, RAM and screen are cleared while the loader reloads slot 0.
+//
+// debug_unit takes the serial link's DEBUG and READ requests. Power-on, s2,
+// the end of a flash session and a lost link put it back to full-speed run.
+// Its RESET pulse resets the CPU as s1 does.
 module flash_boot_system #(
     parameter SESSION_TIMEOUT_CYCLES = 27_000_000
 ) (
@@ -62,19 +66,37 @@ module flash_boot_system #(
     output wire        fl_busy,
     output wire        fl_rsp,
     output wire [1:0]  fl_status,
-    output wire [31:0] fl_crc
+    output wire [31:0] fl_crc,
+    input  wire        dbg_cmd,
+    input  wire [2:0]  dbg_op,
+    input  wire [7:0]  dbg_seq,
+    input  wire [24:0] dbg_gap,
+    output wire        cmd_done,
+    input  wire        rd,
+    input  wire        rd_rom,
+    input  wire [14:0] rd_addr,
+    input  wire [6:0]  rd_count,
+    output wire        rd_word_valid,
+    output wire [15:0] rd_word,
+    output wire        rd_end,
+    output wire        rd_refused,
+    output wire        paused,
+    output wire [24:0] gap,
+    output wire [7:0]  step_seq,
+    output wire [14:0] next_pc,
+    input  wire        link_lost
 );
 
-    wire done, session, session_end, clearing;
-    wire cpu_reset = ~por_n | ~done | s1 | session | clearing;
+    wire done, session, session_end, clearing, reset_cpu;
+    wire cpu_reset = ~por_n | ~done | s1 | session | clearing | reset_cpu;
     assign running = ~cpu_reset;
 
-    // 0 WAIT (no PSRAM yet), 1 LOAD (loading or S2 held), 2 RUN, 3 RESET (S1
-    // held), 4 NO IMG, 5 BADCRC, 6 WRITE (flash session)
+    // 0 WAIT (no PSRAM yet), 1 LOAD (loading or S2 held), 2 RUN (also slowed),
+    // 3 RESET (S1 held), 4 NO IMG, 5 BADCRC, 6 WRITE (flash session), 7 PAUSE
     assign boot_state = session    ? 3'd6 :
                         err_header ? 3'd4 :
                         err_crc    ? 3'd5 :
-                        done       ? (cpu_reset ? 3'd3 : 3'd2) :
+                        done       ? (cpu_reset ? 3'd3 : paused ? 3'd7 : 3'd2) :
                         init_done  ? 3'd1 : 3'd0;
 
     // the loader's and the session's reader requests; the session's win while it's open
@@ -160,12 +182,36 @@ module flash_boot_system #(
         .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata)
     );
 
+    wire exec, fetch_en, fetch_start, idle;
+    wire dbg_mreq, dbg_mgnt, dbg_preq, dbg_pready;
+    wire [14:0] dbg_maddr, dbg_paddr;
+    wire [15:0] dbg_mdata, dbg_pdata;
+
+    debug_unit debug (
+        .clk(clk), .rst(~por_n), .go_run(~por_n | s2 | session_end | link_lost),
+        .cmd(dbg_cmd), .cmd_op(dbg_op), .cmd_seq(dbg_seq), .cmd_gap(dbg_gap),
+        .cmd_done(cmd_done),
+        .rd(rd), .rd_rom(rd_rom), .rd_addr(rd_addr), .rd_count(rd_count),
+        .rd_word_valid(rd_word_valid), .rd_word(rd_word), .rd_end(rd_end),
+        .rd_refused(rd_refused),
+        .paused(paused), .gap(gap), .step_seq(step_seq), .reset_cpu(reset_cpu),
+        .cpu_hold(cpu_reset), .exec(exec), .fetch_start(fetch_start), .idle(idle),
+        .fetch_en(fetch_en),
+        .dbg_mreq(dbg_mreq), .dbg_maddr(dbg_maddr), .dbg_mgnt(dbg_mgnt), .dbg_mdata(dbg_mdata),
+        .dbg_preq(dbg_preq), .dbg_paddr(dbg_paddr), .dbg_pready(dbg_pready),
+        .dbg_pdata(dbg_pdata)
+    );
+
     hack_computer computer (
         .clk(clk), .reset(cpu_reset), .clear(session_end), .clearing(clearing),
         .pm_req(pm_req), .pm_addr(pm_addr), .pm_ready(pm_ready), .pm_data(pm_data),
         .keyboard(keyboard), .vclk(vclk), .vaddr(vaddr), .vdata(vdata),
-        .dbg_pc(dbg_pc), .dbg_a(dbg_a), .dbg_d(dbg_d), .dbg_instr(dbg_instr), .dbg_exec(),
-        .dbg_we(dbg_we), .dbg_waddr(dbg_waddr), .dbg_wdata(dbg_wdata)
+        .dbg_pc(dbg_pc), .dbg_a(dbg_a), .dbg_d(dbg_d), .dbg_instr(dbg_instr), .dbg_exec(exec),
+        .dbg_we(dbg_we), .dbg_waddr(dbg_waddr), .dbg_wdata(dbg_wdata),
+        .fetch_en(fetch_en), .dbg_mreq(dbg_mreq), .dbg_maddr(dbg_maddr), .dbg_mgnt(dbg_mgnt),
+        .dbg_mdata(dbg_mdata), .dbg_preq(dbg_preq), .dbg_paddr(dbg_paddr),
+        .dbg_pready(dbg_pready), .dbg_pdata(dbg_pdata),
+        .fetch_start(fetch_start), .idle(idle), .next_pc(next_pc)
     );
 
     hack_stats stats (

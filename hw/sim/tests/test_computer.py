@@ -1,4 +1,5 @@
 import os
+import random
 from pathlib import Path
 
 import pytest
@@ -220,3 +221,89 @@ def test_clear_zeroes_ram_and_screen():
     assert not any(sim.ram) and not any(sim.screen)
     # one write per cycle, 24576 words
     assert 24576 <= sim.clear_cycles <= 24580
+
+
+def test_paused_runs_match_emulator():
+    rng = random.Random(1)
+    points = sorted(rng.sample(range(1, 20_000), 30))
+    debug = [("pause", at, rng.randint(1, 200)) for at in points]
+    for progmem in ("sim", "rom", "psram"):
+        sim = assert_matches(program("screen_pattern"), 20_000, debug=debug, progmem=progmem)
+        assert sim.cycles >= 2 * 20_000 + sum(p[2] for p in debug)
+
+
+def test_debug_reads_match_emulator():
+    rom = assemble(translate(FIB_VM))
+    points = [1 + 3000 * k for k in range(10)]
+    debug = []
+    for at in points:
+        debug += [("pause", at, 400), ("mread", at, 0, 64), ("pread", at, 0, 64)]
+    sim = assert_matches(rom, 31_000, debug=debug)
+    m, done, want = HackMachine(rom), 0, []
+    for at in points:
+        m.run(at - done)
+        done = at
+        want += [(at, "m", 0, m.ram[:64]), (at, "p", 0, rom[:64])]
+    assert sorted(sim.reads) == sorted(want)
+
+
+def test_debug_reads_cross_regions():
+    rom = assemble(CLEAR_ROM)
+    rom += [i & 0x7FFF for i in range(len(rom), 32768)]
+    debug = [("pause", 8, 300), ("mread", 8, 16380, 8), ("mread", 8, 24570, 8),
+             ("pread", 8, 32704, 64)]
+    sim = run_computer(rom, 10, ram_init={16380: 1, 16381: 2, 16382: 3},
+                       keyboard=[(0, 77)], debug=debug)
+    assert sim.reads == [
+        (8, "m", 16380, [1, 2, 3, 0xFFFF, 0xFFFF, 0, 0, 0]),
+        (8, "m", 24570, [0] * 5 + [0xFFFF, 77, 0]),
+        (8, "p", 32704, list(range(32704, 32768))),
+    ]
+
+
+INM_ROM = """
+(LOOP)
+@0
+D=M
+@1
+M=D+M
+@1
+D=M
+@0
+M=D+1
+@LOOP
+0;JMP
+"""
+
+
+@pytest.mark.parametrize("latency", [1, 3])
+def test_reads_never_disturb_inm(latency):
+    # Every instruction pauses for one cycle and queues a read of RAM[100..101],
+    # so a read is waiting in every fetch and execute cycle
+    debug = []
+    for at in range(1, 2000):
+        debug += [("pause", at, 1), ("mread", at, 100, 2)]
+    ram_init = {0: 3, 1: 5, 100: 0x5555, 101: 0x2AAA}
+    sim = assert_matches(assemble(INM_ROM), 2000, ram_init=ram_init, pm_latency=latency,
+                         debug=debug)
+    assert len(sim.reads) == 1999
+    assert all(words == [0x5555, 0x2AAA] for _, _, _, words in sim.reads)
+
+
+def test_pread_psram_evicts_but_matches():
+    # Short pauses, so reads overlap running and misses race the CPU's fetches
+    rom = long_loop()
+    rng = random.Random(2)
+    debug = []
+    for at in sorted(rng.sample(range(1, 6000), 40)):
+        addr = rng.randrange(0, len(rom) - 64)
+        debug += [("pause", at, rng.choice([1, 20, 300])), ("pread", at, addr, 64)]
+    sim = assert_matches(rom, 6000, progmem="psram", debug=debug)
+    assert len(sim.reads) == 40
+    assert all(words == rom[addr:addr + 64] for _, _, addr, words in sim.reads)
+
+
+def test_gap_spaces_fetch_starts():
+    sim = assert_matches(program("screen_pattern"), 2000, gap=50)
+    assert len(sim.starts) == 2000
+    assert {b - a for a, b in zip(sim.starts, sim.starts[1:])} == {50}
