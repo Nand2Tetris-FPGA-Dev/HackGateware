@@ -113,3 +113,12 @@ def test_write_state_name(tmp_path):
     lines = _text(tmp_path)
     assert lines[0].endswith("WRITE ") and lines[1].strip() == ""
     assert lines == status_lines(**values)
+
+
+@pytest.mark.requires_iverilog
+def test_pause_state_name(tmp_path):
+    values = PONG | {"state": 7}
+    _run(tmp_path, values)
+    lines = _text(tmp_path)
+    assert lines[0].endswith("PAUSE ") and lines[1].startswith("Pong demo")
+    assert lines == status_lines(**values)

@@ -5,10 +5,12 @@ from pathlib import Path
 
 import pytest
 from hacktools.assembler import assemble
+from hacktools.emulator import HackMachine
 from hacktools.image import build_image
 from hacktools.link import (
-    BEGIN, CRC, DATA, END, ERASE, HELLO, PAGE_SIZE, PROGRAM, crc_payload, data_payload,
-    erase_payload, program_payload,
+    BEGIN, CRC, DATA, DEBUG, END, ERASE, HELLO, OP_PAUSE, OP_RESET, OP_SPEED, OP_STEP,
+    PAGE_SIZE, PROGRAM, READ_RAM, READ_ROM, STATUS_REQ, crc_payload, data_payload,
+    debug_payload, erase_payload, parse_read, program_payload, read_payload,
 )
 
 from serial_frames import decode_frames, encode_frame, parse_status
@@ -31,6 +33,7 @@ SOURCES = [
     HW / "rtl/io/frame_rx.v",
     HW / "rtl/io/frame_tx.v",
     HW / "rtl/debug/hack_stats.v",
+    HW / "rtl/debug/debug_unit.v",
     HW / "rtl/progmem/progmem_psram.v",
     HW / "rtl/top/hack_computer.v",
     HW / "rtl/cpu/hack_cpu.v",
@@ -51,8 +54,13 @@ ROM = assemble("""
 IMAGE = build_image(ROM, "KBD")
 KBD = 24576
 RUN = 2
+RESET = 3
+PAUSE = 7
 REPLY_CYCLES = 40 * 10 * 9    # a STATUS reply going out
 CPB = 9
+WATCHDOG = 100000             # tb_serial_system's default
+STATUS_BITS = 600             # a 45-byte STATUS or DEBUG reply
+READ_BITS = 400               # a 6-word READ reply
 
 # COPY_ROM copies RAM[16], SCREEN[8191] and RAM[16383] to RAM[17..19], then
 # writes all three. The new image also writes 4321 to RAM[20] and is padded
@@ -77,6 +85,7 @@ class Run:
     tx: bytearray = field(default_factory=bytearray)
     resets: list[int] = field(default_factory=list)
     end: int = 0
+    end_executed: int = 0
     press: int = 0
     result: dict[str, int] = field(default_factory=dict)
     ram: list[int] = field(default_factory=list)
@@ -87,15 +96,17 @@ class Run:
         return [(c, v) for c, a, v in self.writes if a == 1]
 
 
-def run(cwd, items, tail=REPLY_CYCLES + 2000, image=IMAGE, timeout=None, **plusargs):
-    """items: bytes sent back to back, ("idle", bits) or ("s2", cycles held)."""
+def run(cwd, items, tail=REPLY_CYCLES + 2000, image=IMAGE, timeout=None, watchdog=None,
+        **plusargs):
+    """items: bytes sent back to back, ("idle", bits), ("s2", cycles held) or
+    ("s1", level)."""
     (cwd / "flash.hex").write_text(flash_hex(image))
     lines, idle = [], 0
     for item in items:
         if isinstance(item, tuple) and item[0] == "idle":
             idle += item[1]
         elif isinstance(item, tuple):
-            lines.append(f"{idle} s2 {item[1]}")
+            lines.append(f"{idle} {item[0]} {item[1]}")
             idle = 0
         else:
             for b in item:
@@ -103,8 +114,10 @@ def run(cwd, items, tail=REPLY_CYCLES + 2000, image=IMAGE, timeout=None, **plusa
                 idle = 0
     (cwd / "rx.txt").write_text("".join(f"{line}\n" for line in lines))
     args = {"TAIL": str(tail)} | {k: str(v) for k, v in plusargs.items()}
-    defines = {"SESSION_TIMEOUT": str(timeout)} if timeout else None
-    out = iverilog(SOURCES, "tb_serial_system", plusargs=args, defines=defines,
+    defines = {"SESSION_TIMEOUT": str(timeout)} if timeout else {}
+    if watchdog:
+        defines["WATCHDOG"] = str(watchdog)
+    out = iverilog(SOURCES, "tb_serial_system", plusargs=args, defines=defines or None,
                    cwd=cwd).splitlines()
     assert "DONE" in out and "TIMEOUT" not in out, out[-20:]
     for bad in ("FAIL", "ERROR", "IGNORED", "BUSY", "REJECTED"):
@@ -122,6 +135,7 @@ def run(cwd, items, tail=REPLY_CYCLES + 2000, image=IMAGE, timeout=None, **plusa
             r.resets.append(int(rest[0]))
         elif word == "END":
             r.end = int(rest[0])
+            r.end_executed = int(rest[1].split("=")[1])
         elif word == "PRESS":
             r.press = int(rest[0])
         elif word == "S2":
@@ -269,3 +283,98 @@ def test_s2_mid_write(tmp_path):
     assert replies[5][1] == b"\x00" + zlib.crc32(NEW_IMAGE).to_bytes(4, "little")
     assert parse_status(replies[7][1])["boot_state"] == RUN
     assert last_writes(r)[20] == 4321
+
+
+def debug(op, seq=0, gap=0):
+    return frame(DEBUG, debug_payload(op, seq, gap), STATUS_BITS)
+
+
+def statuses(r, types):
+    replies = decode_frames(bytes(r.tx))
+    assert [t for t, _ in replies] == types
+    return [parse_status(p) for t, p in replies if t in (0x83, 0x84)], replies
+
+
+def trace(cwd):
+    return (cwd / "trace.txt").read_text().splitlines()
+
+
+def test_pause_step_read_over_serial(tmp_path):
+    items = [key(0x41)] + debug(OP_PAUSE)
+    for seq in (1, 2, 3):
+        items += debug(OP_STEP, seq)
+    items += frame(READ_RAM, read_payload(1, 1), READ_BITS)
+    items += frame(READ_ROM, read_payload(0, len(ROM)), READ_BITS)
+    r = run(tmp_path, items)
+    s, replies = statuses(r, [0x84] * 4 + [0x85, 0x86])
+    assert s[0]["paused"] == 1 and s[0]["boot_state"] == PAUSE
+    assert s[0]["next_pc"] < len(ROM)
+    m = HackMachine(ROM)
+    m.pc, m.a, m.d, m.keyboard, m.ram[1] = s[0]["next_pc"], s[0]["a"], s[0]["d"], 0x41, 0x41
+    steps = []
+    for k in (1, 2, 3):
+        pc = m.pc
+        m.step()
+        steps.append(f"{pc:04x} {ROM[pc]:04x} {m.a:04x} {m.d:04x}")
+        assert (s[k]["next_pc"], s[k]["a"], s[k]["d"]) == (m.pc, m.a, m.d)
+        assert s[k]["paused"] == 1 and s[k]["step_seq"] == k
+    # the three steps are the last instructions run
+    assert trace(tmp_path)[-3:] == steps
+    assert parse_read(replies[4][1]) == (1, [0x41])
+    assert parse_read(replies[5][1]) == (0, ROM)
+
+
+def test_watchdog_resumes(tmp_path):
+    items = [key(0x41)] + debug(OP_PAUSE) + debug(OP_SPEED, gap=5000)
+    items += [("idle", WATCHDOG // CPB + 100)] + frame(STATUS_REQ)
+    r = run(tmp_path, items)
+    s, _ = statuses(r, [0x84, 0x84, 0x83])
+    assert s[1]["paused"] == 1 and s[1]["gap"] == 5000
+    assert (s[2]["paused"], s[2]["gap"], s[2]["boot_state"]) == (0, 0, RUN)
+    assert len([c for c, _ in r.r1() if r.end - 2000 < c < r.end]) >= 10
+
+
+def test_s1_while_paused_stays_paused(tmp_path):
+    items = [key(0x41)] + debug(OP_PAUSE) + [("s1", 1)] + frame(STATUS_REQ, idle=STATUS_BITS)
+    items += [("s1", 0)] + frame(STATUS_REQ)
+    r = run(tmp_path, items)
+    s, _ = statuses(r, [0x84, 0x83, 0x83])
+    assert s[1]["boot_state"] == RESET
+    assert (s[2]["paused"], s[2]["next_pc"], s[2]["boot_state"]) == (1, 0, PAUSE)
+    assert trace(tmp_path)[-1] == "reset"
+
+
+def test_s2_and_session_end_resume(tmp_path):
+    reload_bits = (CLEAR_CYCLES + 40 * len(IMAGE) + 5000) // CPB
+    paused = [key(0x41)] + debug(OP_PAUSE) + debug(OP_SPEED, gap=5000)
+    ends = {
+        "s2": [("s2", 3000), ("idle", reload_bits)],
+        "end": frame(HELLO, idle=100) + frame(BEGIN, idle=100) + frame(END, idle=reload_bits),
+    }
+    types = {"s2": [0x84, 0x84, 0x83], "end": [0x84, 0x84, 0x90, 0x91, 0x96, 0x83]}
+    for name, items in ends.items():
+        (tmp_path / name).mkdir()
+        r = run(tmp_path / name, paused + items + frame(STATUS_REQ))
+        s, _ = statuses(r, types[name])
+        assert (s[-1]["paused"], s[-1]["gap"], s[-1]["boot_state"]) == (0, 0, RUN), name
+        assert len([c for c, _ in r.r1() if r.end - 2000 < c < r.end]) >= 10, name
+
+
+def test_slow_run_over_serial(tmp_path):
+    tail = 200_000
+    items = [key(0x41)] + debug(OP_SPEED, gap=2000) + frame(STATUS_REQ)
+    # the default watchdog would end the slow run inside the window
+    r = run(tmp_path, items, tail=tail, watchdog=2 * tail)
+    s, _ = statuses(r, [0x84, 0x83])
+    assert (s[1]["paused"], s[1]["gap"], s[1]["boot_state"]) == (0, 2000, RUN)
+    assert abs(r.result["executed"] - r.end_executed - tail // 2000) <= 1
+
+
+def test_reset_over_serial(tmp_path):
+    # RESET while paused: the CPU resets, pc 0, still paused, nothing runs after
+    items = [key(0x41)] + debug(OP_PAUSE) + debug(OP_STEP, 1) + debug(OP_RESET)
+    r = run(tmp_path, items + frame(STATUS_REQ))
+    s, _ = statuses(r, [0x84] * 3 + [0x83])
+    for st in s[2:]:
+        assert (st["paused"], st["next_pc"], st["boot_state"]) == (1, 0, PAUSE)
+    assert trace(tmp_path)[-1] == "reset"

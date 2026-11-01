@@ -12,7 +12,8 @@ def read_frame(path: Path) -> list[list[int]]:
 
 
 COLS, ROWS = 30, 16
-STATES = {0: "WAIT", 1: "LOAD", 2: "RUN", 3: "RESET", 4: "NO IMG", 5: "BADCRC", 6: "WRITE"}
+STATES = {0: "WAIT", 1: "LOAD", 2: "RUN", 3: "RESET", 4: "NO IMG", 5: "BADCRC", 6: "WRITE",
+          7: "PAUSE"}
 
 
 def read_font(path: Path) -> list[list[int]]:
@@ -58,7 +59,7 @@ def status_lines(state, slot, name, words, pc, instr, a, d, sp, sp_max, heap_hi)
     put(0, 6, "slot")
     put(0, 11, f"{slot:>2}")
     put(0, 24, STATES[state])
-    if state in (2, 3):
+    if state in (2, 3, 7):
         put(1, 0, f"{name:<16}")
         put(1, 17, f"{words:>5}")
         put(1, 23, "words")

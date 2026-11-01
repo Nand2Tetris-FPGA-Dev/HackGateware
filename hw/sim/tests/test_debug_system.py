@@ -21,6 +21,7 @@ SOURCES = [
     HW / "rtl/io/flash_session.v",
     HW / "rtl/io/boot_loader.v",
     HW / "rtl/debug/hack_stats.v",
+    HW / "rtl/debug/debug_unit.v",
     HW / "rtl/debug/debug_screen.v",
     HW / "rtl/debug/st7789_driver.v",
     HW / "rtl/progmem/progmem_psram.v",

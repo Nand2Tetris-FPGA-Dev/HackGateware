@@ -85,6 +85,13 @@ module top (
     wire [7:0] pb_addr, pb_data;
     wire [1:0] fl_status;
     wire [31:0] fl_crc;
+    wire dbg_cmd, rd, rd_rom, link_lost, cmd_done, rd_word_valid, rd_end, rd_refused, paused;
+    wire [2:0] dbg_op;
+    wire [7:0] dbg_seq, step_seq;
+    wire [24:0] dbg_gap, gap;
+    wire [14:0] rd_addr, next_pc;
+    wire [6:0] rd_count;
+    wire [15:0] rd_word;
 
     flash_boot_system system (
         .clk(clk), .por_n(~por), .s1(s1_pressed), .s2(s2_pressed), .keyboard(keyboard),
@@ -100,10 +107,15 @@ module top (
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi),
         .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
         .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
-        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc),
+        .dbg_cmd(dbg_cmd), .dbg_op(dbg_op), .dbg_seq(dbg_seq), .dbg_gap(dbg_gap),
+        .rd(rd), .rd_rom(rd_rom), .rd_addr(rd_addr), .rd_count(rd_count),
+        .link_lost(link_lost), .cmd_done(cmd_done), .rd_word_valid(rd_word_valid),
+        .rd_word(rd_word), .rd_end(rd_end), .rd_refused(rd_refused),
+        .paused(paused), .gap(gap), .step_seq(step_seq), .next_pc(next_pc)
     );
 
-    // Serial link: keyboard in, status out, flash writes to the system
+    // Serial link: keyboard in, status out, flash writes and debug requests to the system
     serial_link link (
         .clk(clk), .rst(por), .uart_rx(uart_rx), .uart_tx(uart_tx), .keyboard(keyboard),
         .boot_state(boot_state), .pc(dbg_pc), .instr(dbg_instr), .a(dbg_a), .d(dbg_d),
@@ -112,8 +124,11 @@ module top (
         .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
         .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
         .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc),
-        .cmd_done(1'b0), .rd_word_valid(1'b0), .rd_word(16'd0), .rd_end(1'b0),
-        .rd_refused(1'b0), .paused(1'b0), .gap(25'd0), .step_seq(8'd0), .next_pc(15'd0)
+        .dbg_cmd(dbg_cmd), .dbg_op(dbg_op), .dbg_seq(dbg_seq), .dbg_gap(dbg_gap),
+        .rd(rd), .rd_rom(rd_rom), .rd_addr(rd_addr), .rd_count(rd_count),
+        .link_lost(link_lost), .cmd_done(cmd_done), .rd_word_valid(rd_word_valid),
+        .rd_word(rd_word), .rd_end(rd_end), .rd_refused(rd_refused),
+        .paused(paused), .gap(gap), .step_seq(step_seq), .next_pc(next_pc)
     );
 
     // Status LCD. The loader always reads slot 0.
