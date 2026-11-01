@@ -155,3 +155,27 @@ def test_key_test():
     assert any(text_cells(m, char))
     assert text_cells(m, range(30, 31)) == text_cells(m, char), "a tap was lost"
     assert not any(text_cells(m, range(31, 35)))
+
+
+# Reset keeps the screen (the book's reset, S1 and HackLink's Reset), so a
+# count that got shorter must not leave old digits behind.
+@pytest.mark.requires_env("N2T_OS_DIR", "N2T_JACK_COMPILER")
+def test_key_test_count_after_reset():
+    words = build_program(
+        SW / "demo" / "KeyTest",
+        Path(os.environ["N2T_OS_DIR"]),
+        compiler_command(os.environ["N2T_JACK_COMPILER"]),
+    )
+    m = HackMachine(words)
+    count = range(30, 35)
+    m.run(16_000_000)
+    zero = text_cells(m, count)
+    assert any(zero)
+
+    taps = [(40_000 * i, 65 if i % 2 == 0 else 0) for i in range(20)]
+    m.run(2_000_000, keyboard=taps)
+    assert any(text_cells(m, range(31, 32))), "10 presses should show two digits"
+
+    m.reset()
+    m.run(16_000_000)
+    assert text_cells(m, count) == zero, "old digits left after reset"
