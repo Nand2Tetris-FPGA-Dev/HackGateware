@@ -151,6 +151,21 @@ def test_word_not_yet_arrived(tmp_path):
     assert len(_reads(run)) == 1
 
 
+@pytest.mark.parametrize("real", [False, True], ids=["model", "psram_ctrl"])
+def test_hit_other_slot_during_fill(tmp_path, real):
+    # Block 0 is in. Hits to it while block 1 fills are still same-cycle.
+    a, b = _words(32, seed=21), _words(32, seed=22)
+    ops = load_words(a) + load_words(b, base=32)
+    ops += [fetch(0), idle(IDLE), fetch(40), fetch(1), fetch(31), fetch(42), idle(IDLE)]
+    run = _run(tmp_path, ops, real)
+    assert [(f.addr, f.data) for f in run.fetches] == [
+        (0, a[0]), (40, b[8]), (1, a[1]), (31, a[31]), (42, b[10])]
+    assert [f.lat for f in run.fetches[2:4]] == [0, 0]
+    second = _reads(run)[1]
+    assert run.fetches[3].at < _rsp_after(run, second.at)
+    assert len(_reads(run)) == 2
+
+
 def test_miss_during_fill_waits_for_burst(tmp_path):
     a, b = _words(32, seed=11), _words(32, seed=12)
     run = _run(tmp_path, load_words(a) + load_words(b, base=96) + [fetch(10), fetch(100)])

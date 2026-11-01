@@ -121,7 +121,7 @@ def test_reset_during_psram_fetch(at, delay, length):
 
 
 def test_long_loop_cosim_psram():
-    # 40 blocks through 16 slots: round-robin evicts blocks still in use
+    # 40 blocks through BLOCKS slots: round-robin evicts blocks still in use
     assert_matches(long_loop(), 6000, progmem="psram")
 
 
