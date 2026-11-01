@@ -23,10 +23,10 @@ module tb_frames;
     );
 
     reg start = 0, out_ready = 0;
-    reg [6:0] len = 0;
-    reg [7:0] src [0:63];
+    reg [7:0] len = 0;
+    reg [7:0] src [0:255];
     wire busy, out_valid;
-    wire [5:0] src_addr;
+    wire [7:0] src_addr;
     wire [7:0] out_byte;
 
     frame_tx tx_dut (

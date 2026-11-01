@@ -122,7 +122,14 @@ def test_tx_matches_reference(tmp_path):
         packet(0x00),
         packet(0x01, b"\x00"),
         packet(0x02, bytes(range(1, 63))),
+        packet(0x84, rng.randbytes(45)),
+        packet(0x85, rng.randbytes(131)),               # READ reply, 64 words
+        packet(0x86, bytes(131)),
+        packet(0x85, bytes(range(1, 132))),             # one 133-byte block
     ]
+    # frame_tx's longest: 252 bytes, 253 with the crc, all in one block (code 0xFE)
+    packets.append(next(p for p in (packet(0x85, bytes([b]) + bytes(range(1, 251)))
+                                    for b in range(1, 256)) if crc8(p) != 0))
     packets.append(next(p for p in (packet(1, bytes([b])) for b in range(256)) if crc8(p) == 0))
     (tmp_path / "src.hex").write_text(
         "".join(f"{len(p):x} {' '.join(f'{b:02x}' for b in p)}\n" for p in packets))

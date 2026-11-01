@@ -3,15 +3,15 @@
 // Sends COBS(type, payload..., crc8) 0x00 to uart_tx. The message is read
 // through src_addr; byte index len is the crc. A pass over the source works out
 // the crc, then each COBS block is scanned for its next zero to get the code
-// byte before its data goes out. Messages are under 254 bytes, so no block
-// needs a 0xFF code.
+// byte before its data goes out. With the crc a message is at most 253 bytes,
+// so no block needs a 0xFF code.
 module frame_tx (
     input  wire       clk,
     input  wire       rst,
     input  wire       start,          // taken when busy is low
-    input  wire [6:0] len,            // type + payload bytes, at most 63
+    input  wire [7:0] len,            // type + payload bytes, at most 252
     output wire       busy,
-    output wire [5:0] src_addr,
+    output wire [7:0] src_addr,
     input  wire [7:0] src_data,       // combinational on src_addr
     output reg        out_valid = 0,
     output reg  [7:0] out_byte = 0,
@@ -23,14 +23,14 @@ module frame_tx (
     localparam IDLE = 3'd0, CRC = 3'd1, SCAN = 3'd2, CODE = 3'd3, DATA = 3'd4, DELIM = 3'd5;
 
     reg [2:0] state = IDLE;
-    reg [6:0] last = 0;         // index of the crc byte
-    reg [6:0] idx = 0;
-    reg [6:0] pos = 0;          // first byte of the current block
-    reg [6:0] blk_end = 0;      // index of the zero ending it, or last + 1
+    reg [7:0] last = 0;         // index of the crc byte
+    reg [7:0] idx = 0;
+    reg [7:0] pos = 0;          // first byte of the current block
+    reg [7:0] blk_end = 0;      // index of the zero ending it, or last + 1
     reg [7:0] crc = 0;
 
     assign busy = state != IDLE;
-    assign src_addr = idx[5:0];
+    assign src_addr = idx;
     wire [7:0] cur = idx == last ? crc : src_data;
 
     always @(posedge clk) begin
@@ -56,7 +56,7 @@ module frame_tx (
                 end
             SCAN:
                 if (idx > last || cur == 0) begin
-                    out_byte <= {1'b0, idx - pos} + 1'b1;
+                    out_byte <= idx - pos + 1'b1;
                     out_valid <= 1;
                     blk_end <= idx;
                     idx <= pos;

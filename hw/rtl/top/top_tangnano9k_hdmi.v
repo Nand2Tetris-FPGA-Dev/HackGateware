@@ -111,7 +111,9 @@ module top (
         .prog_name(prog_name),
         .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
         .pb_we(pb_we), .pb_addr(pb_addr), .pb_data(pb_data),
-        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc)
+        .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc),
+        .cmd_done(1'b0), .rd_word_valid(1'b0), .rd_word(16'd0), .rd_end(1'b0),
+        .rd_refused(1'b0), .paused(1'b0), .gap(25'd0), .step_seq(8'd0), .next_pc(15'd0)
     );
 
     // Status LCD. The loader always reads slot 0.
