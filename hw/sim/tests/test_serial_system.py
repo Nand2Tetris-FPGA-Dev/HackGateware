@@ -370,6 +370,19 @@ def test_slow_run_over_serial(tmp_path):
     assert abs(r.result["executed"] - r.end_executed - tail // 2000) <= 1
 
 
+@pytest.mark.parametrize("gap", [1, 2])
+def test_read_at_small_gap_over_serial(tmp_path, gap):
+    # a buffered fetch takes 2 cycles, so at these gaps the CPU never idles by itself
+    items = [key(0x41)] + debug(OP_SPEED, gap=gap)
+    items += frame(READ_RAM, read_payload(1, 1), READ_BITS)
+    items += frame(READ_ROM, read_payload(0, len(ROM)), READ_BITS) + frame(STATUS_REQ)
+    r = run(tmp_path, items)
+    s, replies = statuses(r, [0x84, 0x85, 0x86, 0x83])
+    assert (s[1]["paused"], s[1]["gap"], s[1]["boot_state"]) == (0, gap, RUN)
+    assert parse_read(replies[1][1]) == (1, [0x41])
+    assert parse_read(replies[2][1]) == (0, ROM)
+
+
 def test_reset_over_serial(tmp_path):
     # RESET while paused: the CPU resets, pc 0, still paused, nothing runs after
     items = [key(0x41)] + debug(OP_PAUSE) + debug(OP_STEP, 1) + debug(OP_RESET)

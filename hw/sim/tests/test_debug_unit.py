@@ -234,15 +234,18 @@ def test_reset_keeps_pause():
     assert run.paused and run.executed == pause.executed + 2
 
 
-def test_speed_spacing():
+@pytest.mark.parametrize("at", [2000, 2001, 2002])
+def test_speed_spacing(at):
     base = run_unit(FIB, 12_000)
     zero = run_unit(FIB, 12_000, [cmd(SPEED, at=10, gap=0)])
     assert zero.starts == base.starts and zero.trace == base.trace
-    items = [cmd(SPEED, at=2000, gap=100), cmd(SPEED, at=8000, gap=0)]
+    items = [cmd(SPEED, at=at, gap=100), cmd(SPEED, at=8000, gap=0)]
     run = run_unit(FIB, 12_000, items)
     slow, full = run.dones
     assert slow.gap == 100 and full.gap == 0 and run.gap == 0
-    assert gaps(run.starts_between(slow.cycle, full.issued)) == {100}
+    # from the last start before the new gap: no fetch slips in at the old speed
+    last = run.starts_between(0, slow.cycle)[-1]
+    assert gaps(run.starts_between(last, full.issued)) == {100}
     assert gaps(run.starts_between(full.cycle)) == gaps(base.starts)
     assert_trace(FIB, run)
 
@@ -294,6 +297,20 @@ def test_reads_while_slowed_keep_trace():
             assert r.words == machine(FIB, r.executed).ram[256:320]
             checked += 1
     assert checked >= 5
+    assert_trace(FIB, run)
+
+
+@pytest.mark.parametrize("gap,latency", [(1, 1), (3, 1), (22, 20)])
+def test_reads_at_gap_within_an_instruction(gap, latency):
+    # each fetch takes latency + 2 cycles, so since >= gap whenever the CPU is back in REQ
+    items = [cmd(SPEED, at=10, gap=gap), read(False, 256, 64, at=1000), read(True, 0, 64)]
+    run = run_unit(FIB, 6000, items, latency)
+    assert run.left == 0
+    speed = run.dones[0]
+    assert min(gaps(run.starts_between(speed.cycle))) >= gap
+    ram, rom = run.reads
+    assert not ram.refused and len(ram.words) == 64
+    assert (rom.refused, rom.words) == (False, FIB[:64])
     assert_trace(FIB, run)
 
 
