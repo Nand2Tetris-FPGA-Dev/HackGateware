@@ -27,7 +27,7 @@ def iverilog(
         compile_argv += [Path(s).as_posix() for s in sources]
         c = subprocess.run(compile_argv, capture_output=True, text=True, cwd=cwd)
         if c.returncode != 0:
-            raise SimError(f"iverilog failed:\n{c.stderr}")
+            raise SimError(f"iverilog failed (exit {c.returncode}):\n{c.stdout}\n{c.stderr}")
 
         run_argv = ["vvp", "-n", str(vvp_file)]
         run_argv += [f"+{k}={v}" for k, v in (plusargs or {}).items()]
