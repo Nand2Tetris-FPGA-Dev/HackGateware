@@ -5,7 +5,8 @@
 // Once the CPU runs, rx.txt is bit-banged into uart_rx as in tb_serial_link
 // ("<idle_bits> <hex byte>" per line, "<idle_bits> s2 <cycles>" to hold S2, or
 // "<idle_bits> s1 <0|1>" to set S1); prints SENT per byte and END after the
-// last. +PRESS_AT=n holds S1 for 3 cycles from n cycles after END.
+// last. +PRESS_AT=n holds S1 for 3 cycles from n cycles after END. A long S2
+// press is LONG_PRESS_CYCLES = 2000.
 // Prints W per CPU RAM write, KBD on each keyboard change and TX per reply
 // byte, all with the cycle count, "reset" when the CPU goes into reset and
 // CLEAR when RAM and screen clearing starts.
@@ -53,7 +54,7 @@ module tb_serial_system;
     wire [6:0] rd_count;
     wire [15:0] rd_word;
 
-    flash_boot_system #(.SESSION_TIMEOUT_CYCLES(`SESSION_TIMEOUT)) dut (
+    flash_boot_system #(.SESSION_TIMEOUT_CYCLES(`SESSION_TIMEOUT), .LONG_PRESS_CYCLES(2000)) dut (
         .clk(clk), .por_n(por_n), .s1(s1), .s2(s2), .keyboard(keyboard),
         .flash_clk(flash_clk), .flash_cs_n(flash_cs_n),
         .flash_mosi(flash_mosi), .flash_miso(flash_miso),

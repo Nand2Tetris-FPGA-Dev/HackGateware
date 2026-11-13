@@ -14,7 +14,8 @@ HW = Path(__file__).resolve().parents[2]
 PROGRAMS = HW.parent / "sw" / "tests"
 MODEL = HW / "third_party/psram_controller/sim/model"
 FLASH_SIZE = 262144  # slots 0 and 1, so reading the wrong slot finds 0xFF
-S1, S2 = 1, 2
+S1, S2, S1_S2 = 1, 2, 3  # tb_flash_boot PRESS
+LONG = 2500  # held past LONG_PRESS_CYCLES = 2000
 EXEC, READ, LOAD, IDLE = 0, 1, 2, 3  # what the press waits for after PRESS_AT
 # tb_flash_boot fl.txt ops: flash session requests, page buffer bytes, wait, end the run
 BEGIN, ERASE, DATA, PROGRAM, CRC, END, PAUSE, STOP = 1, 2, 3, 4, 5, 6, 7, 8
@@ -43,11 +44,14 @@ class Run:
     held_stats: tuple[int, int, int] | None  # (sp, sp_max, heap_hi) just before the release
     fl_rsps: list[tuple[int, int, int]]  # (op, status, crc) per flash session reply
     ram: list[int]
+    released_executed: int | None
 
 
-def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False, fl=None):
-    """press = (S1 or S2, at, wait_for, delay, length). fl = (at, [(op, a, b)])
-    runs flash session commands after instruction `at` (see tb_flash_boot)."""
+def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False, fl=None,
+             end_after=None):
+    """press = (S1, S2 or S1_S2, at, wait_for, delay, length). fl = (at, [(op, a, b)])
+    runs flash session commands after instruction `at` (see tb_flash_boot).
+    end_after ends the run that many cycles after the release."""
     (tmp_path / "flash.hex").write_text(flash_hex(image))
     plusargs = {"STEPS": str(steps),
                 "LIMIT": str(300 * (len(image) + len(image2)) + 45 * steps + 50_000)}
@@ -56,11 +60,14 @@ def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False, fl=None
         plusargs.update(PRESS=str(which), PRESS_AT=str(at), WAIT_FOR=str(wait_for),
                         PRESS_DELAY=str(delay), PRESS_LEN=str(length))
         (tmp_path / "flash2.hex").write_text(flash_hex(image2))
+    if end_after is not None:
+        plusargs["END_AFTER"] = str(end_after)
     if fl:
         plusargs["FL_AT"] = str(fl[0])
         (tmp_path / "fl.txt").write_text("".join(f"{o} {a:x} {b}\n" for o, a, b in fl[1]))
         (tmp_path / "data.hex").write_text("".join(f"{b:02x}\n" for b in FL_DATA))
     sources = [HW / "sim/tb/tb_flash_boot.v", HW / "rtl/top/flash_boot_system.v",
+               HW / "rtl/top/press_timer.v",
                HW / "sim/models/spi_flash_model.v", HW / "rtl/io/spi_flash_reader.v",
                HW / "rtl/io/boot_loader.v", HW / "rtl/debug/hack_stats.v",
                HW / "rtl/debug/debug_unit.v",
@@ -91,12 +98,13 @@ def run_boot(tmp_path, image, steps, image2=b"", press=None, real=False, fl=None
     screen = [int(w, 16) for w in (tmp_path / "screen.txt").read_text().split()]
     pressed = re.search(r"read_in_flight=(\d)", out)
     states = [int(v) for v in re.findall(r"STATE (\S+)", out)]
-    held = re.search(r"RELEASE sp=(\d+) sp_max=(\d+) heap_hi=(\d+)", out)
+    held = re.search(r"RELEASE sp=(\d+) sp_max=(\d+) heap_hi=(\d+) executed=(\d+)", out)
     fl_rsps = [(int(o), int(st), int(c, 16))
                for o, st, c in re.findall(r"FLRSP (\d+) (\d+) (\S+)", out)]
     ram = [int(w, 16) for w in (tmp_path / "ram.txt").read_text().split()]
     return Run(result, pressed and pressed.group(1) == "1", segments, screen, states,
-               held and tuple(int(v) for v in held.groups()), fl_rsps, ram)
+               held and tuple(int(v) for v in held.groups()[:3]), fl_rsps, ram,
+               held and int(held.group(4)))
 
 
 def loads_for(rom):
@@ -161,29 +169,70 @@ def test_bad_crc(tmp_path):
     (500, READ, 48),  # mid-burst
     (500, READ, 64),  # the burst's response edge
 ], ids=["line0", "exec", "idle", "read0", "read17", "read32", "read48", "read64"])
-def test_s2_reloads_mid_run(tmp_path, at, wait_for, delay):
+def test_s2_long_reloads(tmp_path, at, wait_for, delay):
     old, new = long_loop(), program("fill")
     run = run_boot(tmp_path, build_image(old, "old"), 3000, build_image(new, "new"),
-                   press=(S2, at, wait_for, delay, 3))
+                   press=(S2, at, wait_for, delay, LONG))
     r = run.result
     assert run.read_in_flight == (wait_for == READ) or wait_for == EXEC
-    assert (r["running"], r["err_header"], r["err_crc"]) == (1, 0, 0)
+    assert (r["running"], r["err_header"], r["err_crc"], r["paused"]) == (1, 0, 0, 0)
     assert r["loads"] == loads_for(old) + loads_for(new)
     assert len(run.segments) == 2
     m = HackMachine(old)
     assert_runs(run.segments[0], old, m)
-    assert_runs(run.segments[1], new, carried(m, new))
+    assert_runs(run.segments[1], new, cleared(m, new))
 
 
-def test_s2_during_load(tmp_path):
-    # The first load is cut short; the second image runs as if from power-on
-    old, new = program("screen_pattern"), program("fill")
+def test_s2_long_during_load(tmp_path):
+    # The first load is cut short; the second image runs as if from power-on.
+    # The padding makes the first load outlast the hold.
+    old, new = program("screen_pattern") + [0] * 4000, program("fill")
     run = run_boot(tmp_path, build_image(old, "old"), 2000, build_image(new, "new"),
-                   press=(S2, 0, LOAD, 10, 3))
+                   press=(S2, 0, LOAD, 10, LONG))
     r = run.result
     assert (r["running"], r["err_header"], r["err_crc"]) == (1, 0, 0)
+    assert loads_for(new) < r["loads"] < loads_for(old) + loads_for(new)
     assert len(run.segments) == 1
     assert_runs(run.segments[0], new, HackMachine(new))
+
+
+def test_s2_short_pauses(tmp_path):
+    rom = long_loop()
+    run = run_boot(tmp_path, build_image(rom, "loop"), 100_000,
+                   press=(S2, 500, EXEC, 0, 3), end_after=20_000)
+    r = run.result
+    assert (r["running"], r["paused"], r["loads"]) == (1, 1, loads_for(rom))
+    # the press acts on release; an instruction already fetched still runs
+    assert run.released_executed <= r["executed"] <= run.released_executed + 2
+    assert len(run.segments) == 1
+    assert_runs(run.segments[0], rom, HackMachine(rom))
+
+
+@pytest.mark.parametrize("case", ["erased", "loading"])
+def test_s2_short_ignored_when_no_program(tmp_path, case):
+    # NO IMG, or a press while the image loads: it must not pause the program after
+    rom = program("screen_pattern")
+    if case == "erased":
+        run = run_boot(tmp_path, b"", 1, press=(S2, 0, EXEC, 5000, 3))
+        assert run.states == [WAIT, LOADING, NO_IMG]
+    else:
+        run = run_boot(tmp_path, build_image(rom, "pattern"), 2000,
+                       build_image(rom, "pattern"), press=(S2, 0, LOAD, 10, 3))
+        assert run.result["loads"] == loads_for(rom) and len(run.segments) == 1
+        assert_runs(run.segments[0], rom, HackMachine(rom))
+    assert run.result["paused"] == 0
+
+
+def test_s2_short_ignored_while_s1_held(tmp_path):
+    # S1 and S2 down, S2 up (a short press) while S1 still holds the CPU, S1 up
+    rom = long_loop()
+    run = run_boot(tmp_path, build_image(rom, "loop"), 800, press=(S1_S2, 500, EXEC, 0, 100))
+    r = run.result
+    assert (r["running"], r["paused"], r["loads"]) == (1, 0, loads_for(rom))
+    assert len(run.segments) == 2 and len(run.segments[1]) == 300
+    m = HackMachine(rom)
+    assert_runs(run.segments[0], rom, m)
+    assert_runs(run.segments[1], rom, cleared(m, rom))
 
 
 @pytest.mark.parametrize("at,wait_for,delay",
@@ -214,6 +263,29 @@ def test_s1_clears_ram_and_screen(tmp_path):
     assert run.ram[16383] == run.screen[8191] == 0xFFFF
 
 
+
+def test_s2_long_clears_ram_and_screen(tmp_path):
+    rom = assemble(COPY_ROM)
+    image = build_image(rom, "copy")
+    run = run_boot(tmp_path, image, 100_000, image, press=(S2, 30, EXEC, 0, LONG),
+                   end_after=40_000)
+    assert run.result["loads"] == 2 * loads_for(rom)
+    assert len(run.segments) == 2 and len(run.segments[1]) > 22
+    assert run.ram[16:20] == [1234, 0, 0, 0]
+    assert run.ram[16383] == run.screen[8191] == 0xFFFF
+
+
+def test_s2_release_after_long_press_does_nothing(tmp_path):
+    # held well past the reload and its clear, so the program runs when S2 comes up
+    old, new = long_loop(), program("fill")
+    run = run_boot(tmp_path, build_image(old, "old"), 100_000, build_image(new, "new"),
+                   press=(S2, 50, EXEC, 0, 40_000), end_after=5000)
+    r = run.result
+    assert (r["running"], r["paused"]) == (1, 0)
+    assert r["loads"] == loads_for(old) + loads_for(new)
+    assert len(run.segments) == 2 and r["executed"] > run.released_executed + 100
+
+
 def test_boots_on_psram_ctrl(tmp_path):
     rom = program("screen_pattern")
     run = run_boot(tmp_path, build_image(rom, "pattern"), 3000, real=True)
@@ -223,7 +295,7 @@ def test_boots_on_psram_ctrl(tmp_path):
     assert_runs(run.segments[0], rom, HackMachine(rom))
 
 
-WAIT, LOADING, RUN, RESET, NO_IMG, BAD_CRC, WRITE = range(7)
+WAIT, LOADING, RUN, RESET, NO_IMG, BAD_CRC, WRITE, PAUSED = range(8)
 
 
 def bad_crc_image(rom):
@@ -237,13 +309,19 @@ def bad_crc_image(rom):
     ("erased", [WAIT, LOADING, NO_IMG]),
     ("bad_crc", [WAIT, LOADING, BAD_CRC]),
     ("s1", [WAIT, LOADING, RUN, RESET, RUN]),
-    ("s2", [WAIT, LOADING, RUN, LOADING, RUN]),
+    ("s2", [WAIT, LOADING, RUN, LOADING, RESET, RUN]),
+    ("s2_short", [WAIT, LOADING, RUN, PAUSED]),
 ])
 def test_flash_boot_state_codes(tmp_path, case, states):
     rom = program("screen_pattern")
     image = {"erased": b"", "bad_crc": bad_crc_image(rom)}.get(case, build_image(rom, "pattern"))
-    press = {"s1": (S1, 50, EXEC, 0, 3), "s2": (S2, 50, EXEC, 0, 3)}.get(case)
-    run = run_boot(tmp_path, image, 200, build_image(program("fill"), "new"), press=press)
+    press = {"s1": (S1, 50, EXEC, 0, 3), "s2": (S2, 50, EXEC, 0, LONG),
+             "s2_short": (S2, 50, EXEC, 0, 3)}.get(case)
+    # S2 runs end on time: a pause never reaches the step count, and a long
+    # press takes 2000 cycles before the reload and its clear
+    end_after = {"s2": 40_000, "s2_short": 5000}.get(case)
+    run = run_boot(tmp_path, image, 200 if end_after is None else 100_000,
+                   build_image(program("fill"), "new"), press=press, end_after=end_after)
     assert run.states == states
 
 

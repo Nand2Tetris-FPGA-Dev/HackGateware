@@ -18,6 +18,9 @@
 // go_run forces run at full speed and keeps step_seq. A PAUSE still waiting
 // then gets its done.
 //
+// toggle (the S2 button) flips paused as RUN or PAUSE would, with no done.
+// It is dropped while a command is in progress or arrives with it.
+//
 // Reads: one word at a time through hack_computer's debug ports, RAM words in
 // idle cycles, ROM words between CPU fetches. A word that finds no idle cycle
 // holds off the next paced fetch for one, or a gap no longer than an
@@ -28,6 +31,7 @@ module debug_unit (
     input  wire        clk,
     input  wire        rst,
     input  wire        go_run,       // level: run at gap 0
+    input  wire        toggle,       // 1 cycle
     input  wire        cmd,          // 1 cycle
     input  wire [2:0]  cmd_op,       // 0 RUN 1 PAUSE 2 STEP 3 RESET 4 SPEED
     input  wire [7:0]  cmd_seq,
@@ -139,6 +143,8 @@ module debug_unit (
                     cmd_done <= 1'b1;
                 end
             endcase
+        end else if (toggle & ~wait_idle & ~stepping) begin
+            paused <= ~paused;
         end
         // A step_go still set is used by the next fetch, which now starts anyway
         if (go_run) begin

@@ -13,6 +13,7 @@ FONT = HW / "rtl/debug/font8x8.hex"
 SOURCES = [
     HW / "sim/tb/tb_debug_system.v",
     HW / "rtl/top/flash_boot_system.v",
+    HW / "rtl/top/press_timer.v",
     HW / "sim/models/spi_flash_model.v",
     HW / "sim/models/psram_host_model.v",
     HW / "sim/models/st7789_model.v",

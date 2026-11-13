@@ -6,20 +6,23 @@
 // Once PSRAM is ready the loader copies the image, and the CPU stays in reset
 // until the image checks out. s1 resets the CPU and clears RAM and screen, so
 // a restart is a power-on (Jack programs may count on static variables
-// starting at 0); the program in PSRAM is kept. s2 resets the loader, which drops done and so the CPU,
-// and the loader starts again when s2 goes low. progmem_psram is reset by
+// starting at 0); the program in PSRAM is kept. A short s2 press pauses or
+// resumes a running program, the same pause as the serial link's. A long one
+// (LONG_PRESS_CYCLES, 1 s) reloads: the loader's reset drops done and so the
+// CPU, and RAM and screen are cleared as for s1. progmem_psram is reset by
 // por_n only: a fetch waiting there must get its fetch_ready.
 //
 // fl_* and pb_* carry the serial link's flash requests to flash_session. A
 // session holds the loader and CPU (s1 and s2 do nothing more until it ends);
 // when it ends, RAM and screen are cleared while the loader reloads slot 0.
 //
-// debug_unit takes the serial link's DEBUG and READ requests. Power-on, s1,
-// s2, the end of a flash session and a lost link put it back to full-speed
+// debug_unit takes the serial link's DEBUG and READ requests. Power-on, s1, a
+// reload, the end of a flash session and a lost link put it back to full-speed
 // run. Its RESET pulse resets the CPU and clears RAM and screen as s1 does, but
 // keeps the run state and speed.
 module flash_boot_system #(
-    parameter SESSION_TIMEOUT_CYCLES = 27_000_000
+    parameter SESSION_TIMEOUT_CYCLES = 27_000_000,
+    parameter LONG_PRESS_CYCLES = 27_000_000
 ) (
     input  wire        clk,
     input  wire        por_n,
@@ -93,8 +96,17 @@ module flash_boot_system #(
     wire cpu_reset = ~por_n | ~done | s1 | session | clearing | reset_cpu;
     assign running = ~cpu_reset;
 
-    // 0 WAIT (no PSRAM yet), 1 LOAD (loading or S2 held), 2 RUN (also slowed),
-    // 3 RESET (S1 held), 4 NO IMG, 5 BADCRC, 6 WRITE (flash session), 7 PAUSE
+    wire s2_short, s2_long;
+    press_timer #(.LONG_CYCLES(LONG_PRESS_CYCLES)) s2_timer (
+        .clk(clk), .btn(s2), .short_press(s2_short), .long_press(s2_long)
+    );
+    // only a running program pauses; nothing during a session
+    wire toggle = s2_short & running;
+    wire reload = s2_long & ~session;
+
+    // 0 WAIT (no PSRAM yet), 1 LOAD (loading), 2 RUN (also slowed),
+    // 3 RESET (S1 held or clearing), 4 NO IMG, 5 BADCRC, 6 WRITE (flash session),
+    // 7 PAUSE
     assign boot_state = session    ? 3'd6 :
                         err_header ? 3'd4 :
                         err_crc    ? 3'd5 :
@@ -113,7 +125,7 @@ module flash_boot_system #(
 
     // start is a level: the loader only looks at it when idle after reset
     boot_loader loader (
-        .clk(clk), .rst_n(por_n & ~s2 & ~session), .start(init_done), .slot_base(24'd0),
+        .clk(clk), .rst_n(por_n & ~reload & ~session), .start(init_done), .slot_base(24'd0),
         .rd_start(ld_rd_start), .rd_addr(ld_rd_addr), .rd_stop(ld_rd_stop),
         .rd_valid(rd_valid), .rd_byte(rd_byte), .rd_ready(ld_rd_ready),
         .load_valid(load_valid), .load_ready(load_ready), .load_addr(load_addr),
@@ -190,7 +202,8 @@ module flash_boot_system #(
     wire [15:0] dbg_mdata, dbg_pdata;
 
     debug_unit debug (
-        .clk(clk), .rst(~por_n), .go_run(~por_n | s1 | s2 | session_end | link_lost),
+        .clk(clk), .rst(~por_n), .go_run(~por_n | s1 | reload | session_end | link_lost),
+        .toggle(toggle),
         .cmd(dbg_cmd), .cmd_op(dbg_op), .cmd_seq(dbg_seq), .cmd_gap(dbg_gap),
         .cmd_done(cmd_done),
         .rd(rd), .rd_rom(rd_rom), .rd_addr(rd_addr), .rd_count(rd_count),
@@ -205,7 +218,8 @@ module flash_boot_system #(
     );
 
     hack_computer computer (
-        .clk(clk), .reset(cpu_reset), .clear(session_end | s1 | reset_cpu), .clearing(clearing),
+        .clk(clk), .reset(cpu_reset), .clear(session_end | s1 | reset_cpu | reload),
+        .clearing(clearing),
         .pm_req(pm_req), .pm_addr(pm_addr), .pm_ready(pm_ready), .pm_data(pm_data),
         .keyboard(keyboard), .vclk(vclk), .vaddr(vaddr), .vdata(vdata),
         .dbg_pc(dbg_pc), .dbg_a(dbg_a), .dbg_d(dbg_d), .dbg_instr(dbg_instr), .dbg_exec(exec),

@@ -8,7 +8,7 @@ from hacktools.assembler import assemble
 from hacktools.emulator import HackMachine
 from hacktools.image import build_image
 from hacktools.link import (
-    BEGIN, CRC, DATA, DEBUG, END, ERASE, HELLO, OP_PAUSE, OP_RESET, OP_SPEED, OP_STEP,
+    BEGIN, CRC, DATA, DEBUG, END, ERASE, HELLO, OP_PAUSE, OP_RESET, OP_RUN, OP_SPEED, OP_STEP,
     PAGE_SIZE, PROGRAM, READ_RAM, READ_ROM, STATUS_REQ, crc_payload, data_payload,
     debug_payload, erase_payload, parse_read, program_payload, read_payload,
 )
@@ -21,6 +21,7 @@ HW = Path(__file__).resolve().parents[2]
 SOURCES = [
     HW / "sim/tb/tb_serial_system.v",
     HW / "rtl/top/flash_boot_system.v",
+    HW / "rtl/top/press_timer.v",
     HW / "sim/models/spi_flash_model.v",
     HW / "sim/models/psram_host_model.v",
     HW / "rtl/io/spi_flash_reader.v",
@@ -70,6 +71,8 @@ NEW_ROM = assemble(COPY_ROM.replace("(END)", "@4321\nD=A\n@20\nM=D\n(END)") + "@
 NEW_IMAGE = build_image(NEW_ROM, "new")
 SESSION_TIMEOUT = 20000
 CLEAR_CYCLES = 24576
+LONG = 2500                   # S2 held past LONG_PRESS_CYCLES = 2000
+SHORT = 3
 
 pytestmark = pytest.mark.requires_iverilog
 
@@ -273,11 +276,12 @@ def test_pc_quiet_mid_write(tmp_path):
     assert [r.ram[16], r.ram[16383], r.screen[8191]] == [0, 0, 0]
 
 
-def test_s2_mid_write(tmp_path):
-    # S2 goes down while page 0 programs and comes up before page 1.
+@pytest.mark.parametrize("held", [LONG, SHORT], ids=["long", "short"])
+def test_s2_mid_write(tmp_path, held):
+    # S2 goes down while page 0 programs and comes up before page 1: no reload, no pause
     items = start_frames() + page_frames(NEW_IMAGE, 0)
     program_wait = items.pop()
-    items += [("idle", 5), ("s2", 3000), program_wait]
+    items += [("idle", 5), ("s2", held), program_wait]
     for page in list(pages(NEW_IMAGE))[1:]:
         items += page_frames(NEW_IMAGE, page)
     r = run(tmp_path, items + end_frames(NEW_IMAGE), image=OLD_IMAGE, timeout=SESSION_TIMEOUT)
@@ -286,6 +290,7 @@ def test_s2_mid_write(tmp_path):
     assert [t for t, _ in replies] == [0x90, 0x91, 0x92, 0x94, 0x94, 0x95, 0x96, 0x83]
     assert replies[5][1] == b"\x00" + zlib.crc32(NEW_IMAGE).to_bytes(4, "little")
     assert parse_status(replies[7][1])["boot_state"] == RUN
+    assert parse_status(replies[7][1])["paused"] == 0
     assert last_writes(r)[20] == 4321
 
 
@@ -355,7 +360,7 @@ def test_s2_and_session_end_resume(tmp_path):
     reload_bits = (CLEAR_CYCLES + 40 * len(IMAGE) + 5000) // CPB
     paused = [key(0x41)] + debug(OP_PAUSE) + debug(OP_SPEED, gap=5000)
     ends = {
-        "s2": [("s2", 3000), ("idle", reload_bits)],
+        "s2": [("s2", LONG), ("idle", reload_bits)],
         "end": frame(HELLO, idle=100) + frame(BEGIN, idle=100) + frame(END, idle=reload_bits),
     }
     types = {"s2": [0x84, 0x84, 0x83], "end": [0x84, 0x84, 0x90, 0x91, 0x96, 0x83]}
@@ -365,6 +370,20 @@ def test_s2_and_session_end_resume(tmp_path):
         s, _ = statuses(r, types[name])
         assert (s[-1]["paused"], s[-1]["gap"], s[-1]["boot_state"]) == (0, 0, RUN), name
         assert len([c for c, _ in r.r1() if r.end - 2000 < c < r.end]) >= 10, name
+
+
+
+def test_s2_toggles_shared_pause(tmp_path):
+    # S2 and HackLink flip the same pause
+    press = [("s2", SHORT), ("idle", 10)]
+    items = [key(0x41)] + press + frame(STATUS_REQ, idle=STATUS_BITS)
+    items += debug(OP_RUN) + debug(OP_PAUSE) + press + frame(STATUS_REQ, idle=STATUS_BITS)
+    r = run(tmp_path, items)
+    s, _ = statuses(r, [0x83, 0x84, 0x84, 0x83])
+    assert [(x["paused"], x["boot_state"]) for x in s] == [
+        (1, PAUSE), (0, RUN), (1, PAUSE), (0, RUN)]
+    assert r.resets == [] and r.clears == []
+    assert len([c for c, _ in r.r1() if r.end - 2000 < c < r.end]) >= 10
 
 
 def test_slow_run_over_serial(tmp_path):
