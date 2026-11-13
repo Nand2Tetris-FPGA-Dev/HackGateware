@@ -2,7 +2,8 @@
 
 // Hack computer with its program loaded from flash slot 0 into PSRAM, Hack
 // screen on HDMI, status text on the 1.14" LCD. S1 restarts the program, a
-// short S2 press pauses or resumes it, and holding S2 for 1 s loads it again.
+// short S2 press pauses or resumes it, and holding S2 for 1 s loads the next
+// slot with a program.
 // The PC's keys and status requests come in over the BL702 UART (serial_link).
 // LEDs: 0 = loader busy, 1 = running, 2 = bad header, 3 = bad CRC,
 // 4 = PSRAM ready, 5 = 1 Hz heartbeat.
