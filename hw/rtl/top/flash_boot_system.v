@@ -1,23 +1,32 @@
 `default_nettype none
 
-// The Hack computer running a program copied from SPI flash slot 0 into PSRAM.
+// The Hack computer running a program copied from an SPI flash slot into PSRAM.
 // The board top adds psram_ctrl, clocks, video and pins.
 //
 // Once PSRAM is ready the loader copies the image, and the CPU stays in reset
-// until the image checks out. s1 resets the CPU alone; the program in PSRAM
-// and RAM are kept. s2 resets the loader, which drops done and so the CPU,
-// and the loader starts again when s2 goes low. progmem_psram is reset by
-// por_n only: a fetch waiting there must get its fetch_ready.
+// until the image checks out. s1 resets the CPU and clears RAM and screen, so
+// a restart is a power-on (Jack programs may count on static variables
+// starting at 0); the program in PSRAM is kept. A short s2 press pauses or
+// resumes a running program, the same pause as the serial link's. A long one
+// (LONG_PRESS_CYCLES, 1 s) loads the next slot that holds a program: the
+// loader's reset drops done and so the CPU, and RAM and screen are cleared as
+// for s1. An empty slot (bad header) moves the search on, up to all 32 slots;
+// a bad CRC stops it on BADCRC. Power-on loads slot 0 with no search, so an
+// empty slot 0 shows NO IMG. progmem_psram is reset by por_n only: a fetch
+// waiting there must get its fetch_ready.
 //
 // fl_* and pb_* carry the serial link's flash requests to flash_session. A
-// session holds the loader and CPU (s1 and s2 do nothing more until it ends);
-// when it ends, RAM and screen are cleared while the loader reloads slot 0.
+// session holds the loader and CPU (s1 does nothing more until it ends; an s2
+// press under way in it is dropped); when it ends, RAM and screen are cleared
+// while the loader reloads slot 0 (prog flash waits for slot 0 to run).
 //
-// debug_unit takes the serial link's DEBUG and READ requests. Power-on, s2,
-// the end of a flash session and a lost link put it back to full-speed run.
-// Its RESET pulse resets the CPU as s1 does.
+// debug_unit takes the serial link's DEBUG and READ requests. Power-on, s1, a
+// long s2, the end of a flash session and the link going quiet put it back to
+// full-speed run. Its RESET pulse resets the CPU and clears RAM and screen as
+// s1 does, but keeps the run state and speed.
 module flash_boot_system #(
-    parameter SESSION_TIMEOUT_CYCLES = 27_000_000
+    parameter SESSION_TIMEOUT_CYCLES = 27_000_000,
+    parameter LONG_PRESS_CYCLES = 27_000_000
 ) (
     input  wire        clk,
     input  wire        por_n,
@@ -49,6 +58,7 @@ module flash_boot_system #(
     output wire [2:0]  boot_state,
     output wire [127:0] prog_name,
     output wire [15:0] prog_words,
+    output wire [4:0]  slot,
     output wire [14:0] dbg_pc,
     output wire [15:0] dbg_instr,
     output wire [15:0] dbg_a,
@@ -91,8 +101,38 @@ module flash_boot_system #(
     wire cpu_reset = ~por_n | ~done | s1 | session | clearing | reset_cpu;
     assign running = ~cpu_reset;
 
-    // 0 WAIT (no PSRAM yet), 1 LOAD (loading or S2 held), 2 RUN (also slowed),
-    // 3 RESET (S1 held), 4 NO IMG, 5 BADCRC, 6 WRITE (flash session), 7 PAUSE
+    wire s2_short, s2_long;
+    press_timer #(.LONG_CYCLES(LONG_PRESS_CYCLES)) s2_timer (
+        .clk(clk), .btn(s2), .cancel(session), .short_press(s2_short),
+        .long_press(s2_long)
+    );
+    // only a running program pauses; a press during a session does nothing,
+    // even once the session ends
+    wire toggle = s2_short & running;
+    wire next = s2_long & ~session;
+
+    // A search tries at most 32 slots; tries = 32 means none is running. Slot
+    // offset = slot * 0x20000 (hacktools/image.py). Held at 0 for the whole
+    // session, as the loader starts in the cycle session_end pulses.
+    reg [4:0] slot_q = 5'd0;
+    reg [5:0] tries = 6'd32;
+    wire step = err_header & ~tries[5];
+    wire reload = next | step;
+    assign slot = slot_q;
+
+    always @(posedge clk) begin
+        if (~por_n | session) begin
+            slot_q <= 5'd0;
+            tries <= 6'd32;
+        end else if (reload) begin
+            slot_q <= slot_q + 1'b1;
+            tries <= next ? 6'd1 : tries + 1'b1;
+        end
+    end
+
+    // 0 WAIT (no PSRAM yet), 1 LOAD (loading), 2 RUN (also slowed),
+    // 3 RESET (S1 held or clearing), 4 NO IMG, 5 BADCRC, 6 WRITE (flash session),
+    // 7 PAUSE
     assign boot_state = session    ? 3'd6 :
                         err_header ? 3'd4 :
                         err_crc    ? 3'd5 :
@@ -111,7 +151,8 @@ module flash_boot_system #(
 
     // start is a level: the loader only looks at it when idle after reset
     boot_loader loader (
-        .clk(clk), .rst_n(por_n & ~s2 & ~session), .start(init_done), .slot_base(24'd0),
+        .clk(clk), .rst_n(por_n & ~reload & ~session), .start(init_done),
+        .slot_base({2'b00, slot_q, 17'd0}),
         .rd_start(ld_rd_start), .rd_addr(ld_rd_addr), .rd_stop(ld_rd_stop),
         .rd_valid(rd_valid), .rd_byte(rd_byte), .rd_ready(ld_rd_ready),
         .load_valid(load_valid), .load_ready(load_ready), .load_addr(load_addr),
@@ -187,8 +228,15 @@ module flash_boot_system #(
     wire [14:0] dbg_maddr, dbg_paddr;
     wire [15:0] dbg_mdata, dbg_pdata;
 
+    // link_lost stays high while no PC talks; only its rise resumes, so s2
+    // can still pause a program run without a PC
+    reg lost_q = 1'b0;
+    always @(posedge clk) lost_q <= link_lost;
+
     debug_unit debug (
-        .clk(clk), .rst(~por_n), .go_run(~por_n | s2 | session_end | link_lost),
+        .clk(clk), .rst(~por_n),
+        .go_run(~por_n | s1 | next | session_end | link_lost & ~lost_q),
+        .toggle(toggle),
         .cmd(dbg_cmd), .cmd_op(dbg_op), .cmd_seq(dbg_seq), .cmd_gap(dbg_gap),
         .cmd_done(cmd_done),
         .rd(rd), .rd_rom(rd_rom), .rd_addr(rd_addr), .rd_count(rd_count),
@@ -203,7 +251,8 @@ module flash_boot_system #(
     );
 
     hack_computer computer (
-        .clk(clk), .reset(cpu_reset), .clear(session_end), .clearing(clearing),
+        .clk(clk), .reset(cpu_reset), .clear(session_end | s1 | reset_cpu | next),
+        .clearing(clearing),
         .pm_req(pm_req), .pm_addr(pm_addr), .pm_ready(pm_ready), .pm_data(pm_data),
         .keyboard(keyboard), .vclk(vclk), .vaddr(vaddr), .vdata(vdata),
         .dbg_pc(dbg_pc), .dbg_a(dbg_a), .dbg_d(dbg_d), .dbg_instr(dbg_instr), .dbg_exec(exec),

@@ -13,12 +13,13 @@
 //   4 go_run level a
 //   5 wait until the current read has given a words
 //   6 wait a cycles
+//   7 toggle pulse (S2 short press)
 // Commands and reads wait for the one before to end, as serial_link does.
-// Prints CMD/DONE per command, RD/WORD/END per read, START per fetch_start and
+// Prints TOG per toggle, CMD/DONE per command, RD/WORD/END per read, START per fetch_start and
 // FINAL at the end, and writes trace.txt (pc before, A after, D after).
 module tb_debug_unit;
     reg clk = 0, vclk = 0, rst = 1, init = 1, hold = 0, go_run = 0;
-    reg cmd = 0, rd = 0, rd_rom = 0;
+    reg cmd = 0, rd = 0, rd_rom = 0, toggle = 0;
     reg [2:0] cmd_op = 0;
     reg [7:0] cmd_seq = 0;
     reg [24:0] cmd_gap = 0;
@@ -39,7 +40,7 @@ module tb_debug_unit;
     wire cpu_reset = init | hold | reset_cpu;
 
     debug_unit dut (
-        .clk(clk), .rst(rst), .go_run(go_run),
+        .clk(clk), .rst(rst), .go_run(go_run), .toggle(toggle),
         .cmd(cmd), .cmd_op(cmd_op), .cmd_seq(cmd_seq), .cmd_gap(cmd_gap), .cmd_done(cmd_done),
         .rd(rd), .rd_rom(rd_rom), .rd_addr(rd_addr), .rd_count(rd_count),
         .rd_word_valid(rd_word_valid), .rd_word(rd_word), .rd_end(rd_end),
@@ -149,6 +150,7 @@ module tb_debug_unit;
         end
         cmd = 0;
         rd = 0;
+        toggle = 0;
         ready = 1;
         while (ready && item < n_items && cycles >= it_at[item]) begin
             case (it_kind[item])
@@ -201,6 +203,10 @@ module tb_debug_unit;
                 3: hold = it_a[k] != 0;
                 4: go_run = it_a[k] != 0;
                 6: wait_until = 0;
+                7: begin
+                    toggle = 1;
+                    $display("TOG %0d %0d", cycles + 1, executed);
+                end
                 default: ;
             endcase
         end

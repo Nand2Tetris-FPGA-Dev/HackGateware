@@ -57,14 +57,18 @@ hacktools hw install hdmi
 hacktools prog flash sw/tests/screen_pattern.asm --slot 0
 ```
 
-The board loads slot 0 at power-on. S1 restarts the program, S2 loads it
-from flash again. LEDs: 0 loading, 1 running, 2 no valid program in slot 0,
-3 CRC error, 4 PSRAM ready, 5 heartbeat.
+The board loads slot 0 at power-on. S1 restarts the program on cleared RAM
+and screen, and ends a HackLink pause or slow speed. A short S2 press pauses
+or resumes it (the same pause as HackLink's). Holding S2 for 1 s loads the
+next slot that holds a program, skipping empty ones and wrapping after slot
+31. A slot with a bad CRC stops there on BADCRC; hold S2 again to move on.
+The buttons do nothing while `prog flash` writes. LEDs: 0 loading, 1 running,
+2 no valid program in the slot, 3 CRC error, 4 PSRAM ready, 5 heartbeat.
 
 Once the `hdmi` build runs, `prog flash` writes over the serial link: it finds
 the board's port by itself (`--port COM12` names it), checks the CRC of what it
 wrote, and for slot 0 waits until the new program runs. After any slot is
-written the board loads slot 0 again, as after S2. If no board answers on
+written the board loads slot 0 again. If no board answers on
 serial it says so and writes over JTAG instead (about 100 s); `--jtag` forces
 that. If HackLink has the port open, close it or use `--jtag`.
 
@@ -83,9 +87,12 @@ SP     261 max    290
 heap  2310
 ```
 
-- Boot state: WAIT (no PSRAM yet), LOAD, RUN, RESET (S1 held), NO IMG,
-  BADCRC or WRITE (`prog flash` over serial). The name and size only show in
-  RUN and RESET.
+- slot is the flash slot the program came from (0 while `prog flash` writes,
+  as slot 0 loads next).
+- Boot state: WAIT (no PSRAM yet), LOAD, RUN, PAUSE (S2 or HackLink), RESET
+  (S1 held, or RAM and screen clearing), NO IMG, BADCRC or WRITE
+  (`prog flash` over serial). The name and size only show in RUN, PAUSE and
+  RESET.
 - PC is the address of the instruction in IR. A and D are signed.
 - SP is RAM[0], and max is the highest value written to it.
 - heap is the highest address written in 2048-16383.

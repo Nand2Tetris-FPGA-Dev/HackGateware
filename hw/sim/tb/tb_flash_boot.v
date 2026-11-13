@@ -1,16 +1,20 @@
 `timescale 1ns / 1ps
 
-// flash_boot_system with spi_flash_model (flash.hex, slot 0) and
-// psram_host_model, or with REAL_CTRL psram_ctrl + the W955D8MBYA chip model.
-// Runs until +STEPS instructions, or 20000 cycles after a loader error.
-// +PRESS=1 or 2 holds S1 or S2 for PRESS_LEN cycles. It goes down PRESS_DELAY
+// flash_boot_system with spi_flash_model (flash.hex, FLASH_SIZE bytes, default
+// two slots) and psram_host_model, or with REAL_CTRL psram_ctrl + the
+// W955D8MBYA chip model.
+// Runs until +STEPS instructions, or 20000 cycles after a loader error that stays.
+// +PRESS=1 or 2 holds S1 or S2 for PRESS_LEN cycles; 3 holds both, lets S2 go
+// after PRESS_LEN cycles and S1 PRESS_LEN later. It goes down PRESS_DELAY
 // cycles after instruction PRESS_AT, or with WAIT_FOR=1 after the next PSRAM
 // read is taken, with WAIT_FOR=2 after the next load is taken, or with
-// WAIT_FOR=3 in the next cycle with no PSRAM request out. For S2, flash2.hex
-// replaces the flash contents first.
+// WAIT_FOR=3 in the next cycle with no PSRAM request out. +PRESSES=n repeats
+// the press PRESS_GAP cycles after each release. +END_AFTER=n ends the run n
+// cycles after the last release. A long S2 press is LONG_PRESS_CYCLES = 2000.
 // trace.txt gets "pc instr a d" per instruction and "reset" each time the
-// CPU goes into reset. Prints "STATE n" when boot_state changes and a
-// RESULT line (name in decimal).
+// CPU goes into reset. Prints "STATE n" when boot_state changes, "HEADER n"
+// when the loader starts reading slot n (FAIL if the slot output differs), and
+// a RESULT line (name in decimal).
 // +FL_AT=n runs fl.txt after instruction n (0: once PSRAM is ready), one
 // "op a b" per line (a in hex): 1 BEGIN, 2 ERASE addr size, 4 PROGRAM addr len,
 // 5 CRC addr len, 6 END print "FLRSP op status crc"; 3 DATA writes
@@ -34,11 +38,11 @@ module tb_flash_boot;
     reg [2:0] fl_op = 0;
     reg [23:0] fl_addr = 0, fl_len = 0;
     reg [7:0] pb_addr = 0, pb_data = 0;
-    wire fl_busy, fl_rsp;
+    wire fl_busy, fl_rsp, paused;
     wire [1:0] fl_status;
     wire [31:0] fl_crc;
 
-    flash_boot_system dut (
+    flash_boot_system #(.LONG_PRESS_CYCLES(2000)) dut (
         .clk(clk), .por_n(por_n), .s1(s1), .s2(s2), .keyboard(16'd0),
         .flash_clk(flash_clk), .flash_cs_n(flash_cs_n),
         .flash_mosi(flash_mosi), .flash_miso(flash_miso),
@@ -55,11 +59,14 @@ module tb_flash_boot;
         .fl_busy(fl_busy), .fl_rsp(fl_rsp), .fl_status(fl_status), .fl_crc(fl_crc),
         .dbg_cmd(1'b0), .dbg_op(3'd0), .dbg_seq(8'd0), .dbg_gap(25'd0), .cmd_done(),
         .rd(1'b0), .rd_rom(1'b0), .rd_addr(15'd0), .rd_count(7'd0), .rd_word_valid(),
-        .rd_word(), .rd_end(), .rd_refused(), .paused(), .gap(), .step_seq(), .next_pc(),
+        .rd_word(), .rd_end(), .rd_refused(), .paused(paused), .gap(), .step_seq(), .next_pc(),
         .link_lost(1'b0)
     );
 
-    spi_flash_model #(.HEXFILE("flash.hex"), .SIZE(262144)) flash (
+`ifndef FLASH_SIZE
+`define FLASH_SIZE 262144
+`endif
+    spi_flash_model #(.HEXFILE("flash.hex"), .SIZE(`FLASH_SIZE)) flash (
         .cs_n(flash_cs_n), .clk(flash_clk), .mosi(flash_mosi), .miso(flash_miso)
     );
 
@@ -94,6 +101,7 @@ module tb_flash_boot;
     always #20 vclk = ~vclk;
 
     integer steps, limit, press = 0, press_at = 0, wait_for = 0, press_delay = 0, press_len = 2;
+    integer end_after = -1, presses = 1, press_gap = 0, n_press;
     integer executed = 0, cycles = 0, fetches = 0, loads = 0, errors = 0, err_at = -1;
     integer trace_fd, fd, i;
     reg was_reset = 1, pressed = 0;
@@ -109,12 +117,12 @@ module tb_flash_boot;
             $display("FAIL fetch while loading at %0d", cycles);
             errors = errors + 1;
         end
-        // done drops a cycle after s2, so check from the second cycle of a press
-        if (pressed && (s1 || s2) && running) begin
+        // the CPU stops a cycle after s1, so check from the second cycle of a press
+        if (pressed && s1 && running) begin
             $display("FAIL running while a button is held at %0d", cycles);
             errors = errors + 1;
         end
-        pressed = s1 || s2;
+        pressed = s1;
         if (running && dut.clearing) begin
             $display("FAIL running while clearing at %0d", cycles);
             errors = errors + 1;
@@ -125,7 +133,16 @@ module tb_flash_boot;
         end
         if (dut.cpu_reset && !was_reset) $fdisplay(trace_fd, "reset");
         was_reset = dut.cpu_reset;
-        if ((err_header || err_crc) && err_at < 0) err_at = cycles;
+        if (!(err_header || err_crc)) err_at = -1;
+        else if (err_at < 0) err_at = cycles;
+        if (dut.ld_rd_start) begin
+            $display("HEADER %0d", dut.ld_rd_addr / 24'h020000);
+            if (dut.slot != dut.ld_rd_addr / 24'h020000) begin
+                $display("FAIL slot %0d while reading slot %0d", dut.slot,
+                         dut.ld_rd_addr / 24'h020000);
+                errors = errors + 1;
+            end
+        end
         if (err_at >= 0 && cycles == err_at + 20000) finish_run;
         if (cycles > limit) begin
             $display("TIMEOUT after %0d instructions", executed);
@@ -154,6 +171,9 @@ module tb_flash_boot;
         if (!$value$plusargs("WAIT_FOR=%d", wait_for)) wait_for = 0;
         if (!$value$plusargs("PRESS_DELAY=%d", press_delay)) press_delay = 0;
         if (!$value$plusargs("PRESS_LEN=%d", press_len)) press_len = 2;
+        if (!$value$plusargs("END_AFTER=%d", end_after)) end_after = -1;
+        if (!$value$plusargs("PRESSES=%d", presses)) presses = 1;
+        if (!$value$plusargs("PRESS_GAP=%d", press_gap)) press_gap = 0;
         trace_fd = $fopen("trace.txt", "w");
         repeat (4) @(posedge clk);
         #1 por_n = 1;
@@ -176,14 +196,26 @@ module tb_flash_boot;
                 end
             end
             repeat (press_delay) @(posedge clk);
-            if (press == 2) $readmemh("flash2.hex", flash.mem);
-            #1 s1 = press == 1;
-            s2 = press == 2;
-            $display("PRESS cycle=%0d read_in_flight=%0d", cycles, dut.pm.busy && !dut.pm.busy_we);
-            repeat (press_len) @(posedge clk);
-            #1 $display("RELEASE sp=%0d sp_max=%0d heap_hi=%0d", sp, sp_max, heap_hi);
-            s1 = 0;
-            s2 = 0;
+            for (n_press = 0; n_press < presses; n_press = n_press + 1) begin
+                if (n_press > 0) repeat (press_gap) @(posedge clk);
+                #1 s1 = press != 2;
+                s2 = press != 1;
+                $display("PRESS cycle=%0d read_in_flight=%0d", cycles,
+                         dut.pm.busy && !dut.pm.busy_we);
+                repeat (press_len) @(posedge clk);
+                if (press == 3) begin
+                    #1 s2 = 0;
+                    repeat (press_len) @(posedge clk);
+                end
+                #1 $display("RELEASE sp=%0d sp_max=%0d heap_hi=%0d executed=%0d session=%0d",
+                            sp, sp_max, heap_hi, executed, dut.session);
+                s1 = 0;
+                s2 = 0;
+            end
+            if (end_after >= 0) begin
+                repeat (end_after) @(posedge clk);
+                finish_run;
+            end
         end
     end
 
@@ -252,7 +284,8 @@ module tb_flash_boot;
                      running, busy, err_header, err_crc, executed,
                      "fetches=%0d loads=%0d errors=%0d model_errors=%0d words=%0d ",
                      fetches, loads, errors, `MODEL_ERRORS, prog_words,
-                     "name=%0d sp=%0d sp_max=%0d heap_hi=%0d", prog_name, sp, sp_max, heap_hi);
+                     "name=%0d sp=%0d sp_max=%0d heap_hi=%0d paused=%0d", prog_name, sp, sp_max,
+                     heap_hi, paused);
             $finish;
         end
     endtask

@@ -1,9 +1,10 @@
 `default_nettype none
 
-// Hack computer with its program loaded from flash slot 0 into PSRAM, Hack
-// screen on HDMI, status text on the 1.14" LCD. S1 resets the CPU, S2 loads
-// the program again. The PC's keys and status requests come in over the
-// BL702 UART (serial_link).
+// Hack computer with its program loaded from a flash slot into PSRAM, Hack
+// screen on HDMI, status text on the 1.14" LCD. S1 restarts the program, a
+// short S2 press pauses or resumes it, and holding S2 for 1 s loads the next
+// slot with a program.
+// The PC's keys and status requests come in over the BL702 UART (serial_link).
 // LEDs: 0 = loader busy, 1 = running, 2 = bad header, 3 = bad CRC,
 // 4 = PSRAM ready, 5 = 1 Hz heartbeat.
 module top (
@@ -76,6 +77,7 @@ module top (
     wire busy, running, err_header, err_crc;
     wire [2:0] boot_state;
     wire [127:0] prog_name;
+    wire [4:0] slot;
     wire [15:0] prog_words, dbg_instr, dbg_a, dbg_d, sp, sp_max;
     wire [14:0] dbg_pc, heap_hi;
     wire [15:0] keyboard;
@@ -102,7 +104,7 @@ module top (
         .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata), .init_done(init_done),
         .vclk(clk_pix), .vaddr(vaddr), .vdata(vdata),
         .busy(busy), .running(running), .err_header(err_header), .err_crc(err_crc),
-        .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),
+        .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words), .slot(slot),
         .dbg_pc(dbg_pc), .dbg_instr(dbg_instr), .dbg_a(dbg_a), .dbg_d(dbg_d),
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi),
         .fl_req(fl_req), .fl_op(fl_op), .fl_addr(fl_addr), .fl_len(fl_len),
@@ -131,7 +133,7 @@ module top (
         .paused(paused), .gap(gap), .step_seq(step_seq), .next_pc(next_pc)
     );
 
-    // Status LCD. The loader always reads slot 0.
+    // Status LCD
     wire frame_start, frame_ready, pix_req;
     wire [7:0] pix_x, pix_y;
     wire [15:0] pixel;
@@ -139,7 +141,7 @@ module top (
     debug_screen screen (
         .clk(clk), .rst(por), .frame_start(frame_start), .frame_ready(frame_ready),
         .pix_req(pix_req), .pix_x(pix_x), .pix_y(pix_y), .pixel(pixel),
-        .boot_state(boot_state), .slot(5'd0), .prog_name(prog_name),
+        .boot_state(boot_state), .slot(slot), .prog_name(prog_name),
         .prog_words(prog_words), .pc(dbg_pc), .instr(dbg_instr), .a(dbg_a), .d(dbg_d),
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi)
     );

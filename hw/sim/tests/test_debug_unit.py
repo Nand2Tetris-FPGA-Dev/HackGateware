@@ -53,6 +53,10 @@ def delay(n):
     return (6, 0, n, 0, 0)
 
 
+def toggle(at=0):
+    return (7, at, 0, 0, 0)
+
+
 @dataclass
 class Done:
     op: int
@@ -86,6 +90,7 @@ class Run:
     dones: list[Done]
     reads: list[Read]
     starts: list[int]
+    toggles: list[tuple[int, int]]  # (cycle high, executed then)
     executed: int
     next_pc: int
     paused: int
@@ -129,6 +134,7 @@ def run_unit(rom, cycles, items=(), latency=1) -> Run:
         _, executed, next_pc, paused, gap, step_seq, left, busy = map(int, final.groups())
         return Run(trace, dones, [reads[n] for n in sorted(reads)],
                    [int(c) for c in re.findall(r"START (\d+)", out)],
+                   [tuple(map(int, t)) for t in re.findall(r"TOG (\d+) (\d+)", out)],
                    executed, next_pc, paused, gap, step_seq, left + busy)
 
 
@@ -234,15 +240,18 @@ def test_reset_keeps_pause():
     assert run.paused and run.executed == pause.executed + 2
 
 
-def test_speed_spacing():
+@pytest.mark.parametrize("at", [2000, 2001, 2002])
+def test_speed_spacing(at):
     base = run_unit(FIB, 12_000)
     zero = run_unit(FIB, 12_000, [cmd(SPEED, at=10, gap=0)])
     assert zero.starts == base.starts and zero.trace == base.trace
-    items = [cmd(SPEED, at=2000, gap=100), cmd(SPEED, at=8000, gap=0)]
+    items = [cmd(SPEED, at=at, gap=100), cmd(SPEED, at=8000, gap=0)]
     run = run_unit(FIB, 12_000, items)
     slow, full = run.dones
     assert slow.gap == 100 and full.gap == 0 and run.gap == 0
-    assert gaps(run.starts_between(slow.cycle, full.issued)) == {100}
+    # from the last start before the new gap: no fetch slips in at the old speed
+    last = run.starts_between(0, slow.cycle)[-1]
+    assert gaps(run.starts_between(last, full.issued)) == {100}
     assert gaps(run.starts_between(full.cycle)) == gaps(base.starts)
     assert_trace(FIB, run)
 
@@ -297,6 +306,20 @@ def test_reads_while_slowed_keep_trace():
     assert_trace(FIB, run)
 
 
+@pytest.mark.parametrize("gap,latency", [(1, 1), (3, 1), (22, 20)])
+def test_reads_at_gap_within_an_instruction(gap, latency):
+    # each fetch takes latency + 2 cycles, so since >= gap whenever the CPU is back in REQ
+    items = [cmd(SPEED, at=10, gap=gap), read(False, 256, 64, at=1000), read(True, 0, 64)]
+    run = run_unit(FIB, 6000, items, latency)
+    assert run.left == 0
+    speed = run.dones[0]
+    assert min(gaps(run.starts_between(speed.cycle))) >= gap
+    ram, rom = run.reads
+    assert not ram.refused and len(ram.words) == 64
+    assert (rom.refused, rom.words) == (False, FIB[:64])
+    assert_trace(FIB, run)
+
+
 def test_read_refused_at_full_speed():
     run = run_unit(FIB, 3000, [read(False, 0, 64, at=1000), read(True, 0, 64)])
     assert run.left == 0
@@ -336,4 +359,40 @@ def test_go_run_during_pause_still_replies():
     run = run_unit(FIB, 3000, items, latency=20)
     assert run.left == 0
     assert len(run.dones) == 1 and not run.paused
+    assert_trace(FIB, run)
+
+
+def test_toggle_pauses_and_resumes():
+    items = [cmd(SPEED, at=10, gap=100), toggle(at=2000)]
+    run = run_unit(FIB, 6000, items)
+    (t, _), = run.toggles
+    # a fetch may start the cycle the toggle is high; none after
+    assert run.starts_between(t + 1) == []
+    assert run.paused and run.next_pc == machine(FIB, run.executed).pc
+    assert_trace(FIB, run)
+
+    run = run_unit(FIB, 8000, items + [toggle(at=4000)])
+    (t1, _), (t2, _) = run.toggles
+    assert run.starts_between(t1 + 1, t2 + 1) == []
+    assert not run.paused and run.gap == 100
+    assert gaps(run.starts_between(t2)) == {100}
+    assert_trace(FIB, run)
+
+
+def test_toggle_gives_no_done():
+    # the testbench fails on a cmd_done nothing asked for
+    run = run_unit(FIB, 5000, [toggle(at=2000), toggle(at=3000)], latency=20)
+    assert run.dones == [] and len(run.toggles) == 2 and not run.paused
+
+
+@pytest.mark.parametrize("after", [0, 1])
+def test_toggle_ignored_mid_command(after):
+    # PAUSE waits for idle (latency 20); a toggle then, or with the command, does nothing
+    items = [cmd(PAUSE, at=2000), toggle(at=2000 + after)]
+    run = run_unit(FIB, 4000, items, latency=20)
+    pause, = run.dones
+    (t, _), = run.toggles
+    assert pause.issued <= t < pause.cycle
+    assert pause.paused and run.paused
+    assert run.starts_between(pause.cycle) == []
     assert_trace(FIB, run)

@@ -60,6 +60,7 @@ top = "top"
 sources = [
   "hw/rtl/top/top_tangnano9k_hdmi.v",
   "hw/rtl/top/flash_boot_system.v",
+  "hw/rtl/top/press_timer.v",
   "hw/rtl/top/hack_computer.v",
   "hw/rtl/top/reset_sync.v",
   "hw/rtl/cpu/hack_cpu.v",
@@ -96,6 +97,10 @@ cst = [
   "hw/boards/tangnano9k/lcd.cst",
   "hw/boards/tangnano9k/uart.cst",
 ]
+# synth_gowin maps up to 8-input LUTs by default (abc9 -maxlut 8), built from LUT4
+# and MUX2_LUT5-8 trees; small RTL changes then swing the LUT count by ~1000 and
+# placement fails. -nowidelut keeps to LUT4 (yosys help synth_gowin).
+synth_flags = ["-nowidelut"]
 pack_flags = ["--mspi_as_gpio"]
 
 [spike_lcd]

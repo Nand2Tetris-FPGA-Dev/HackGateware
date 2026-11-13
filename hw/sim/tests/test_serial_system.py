@@ -8,7 +8,7 @@ from hacktools.assembler import assemble
 from hacktools.emulator import HackMachine
 from hacktools.image import build_image
 from hacktools.link import (
-    BEGIN, CRC, DATA, DEBUG, END, ERASE, HELLO, OP_PAUSE, OP_RESET, OP_SPEED, OP_STEP,
+    BEGIN, CRC, DATA, DEBUG, END, ERASE, HELLO, OP_PAUSE, OP_RESET, OP_RUN, OP_SPEED, OP_STEP,
     PAGE_SIZE, PROGRAM, READ_RAM, READ_ROM, STATUS_REQ, crc_payload, data_payload,
     debug_payload, erase_payload, parse_read, program_payload, read_payload,
 )
@@ -21,6 +21,7 @@ HW = Path(__file__).resolve().parents[2]
 SOURCES = [
     HW / "sim/tb/tb_serial_system.v",
     HW / "rtl/top/flash_boot_system.v",
+    HW / "rtl/top/press_timer.v",
     HW / "sim/models/spi_flash_model.v",
     HW / "sim/models/psram_host_model.v",
     HW / "rtl/io/spi_flash_reader.v",
@@ -70,6 +71,8 @@ NEW_ROM = assemble(COPY_ROM.replace("(END)", "@4321\nD=A\n@20\nM=D\n(END)") + "@
 NEW_IMAGE = build_image(NEW_ROM, "new")
 SESSION_TIMEOUT = 20000
 CLEAR_CYCLES = 24576
+LONG = 2500                   # S2 held past LONG_PRESS_CYCLES = 2000
+SHORT = 3
 
 pytestmark = pytest.mark.requires_iverilog
 
@@ -91,15 +94,17 @@ class Run:
     ram: list[int] = field(default_factory=list)
     screen: list[int] = field(default_factory=list)
     s2: list[str] = field(default_factory=list)                         # S2 press lines
+    clears: list[int] = field(default_factory=list)                     # cycle clearing starts
+    headers: list[tuple[int, int]] = field(default_factory=list)        # (cycle, slot) per loader read
 
     def r1(self):
         return [(c, v) for c, a, v in self.writes if a == 1]
 
 
 def run(cwd, items, tail=REPLY_CYCLES + 2000, image=IMAGE, timeout=None, watchdog=None,
-        **plusargs):
-    """items: bytes sent back to back, ("idle", bits), ("s2", cycles held) or
-    ("s1", level)."""
+        long_press=None, **plusargs):
+    """items: bytes sent back to back, ("idle", bits), ("s2", cycles held),
+    ("s2_level", level) or ("s1", level)."""
     (cwd / "flash.hex").write_text(flash_hex(image))
     lines, idle = [], 0
     for item in items:
@@ -117,6 +122,8 @@ def run(cwd, items, tail=REPLY_CYCLES + 2000, image=IMAGE, timeout=None, watchdo
     defines = {"SESSION_TIMEOUT": str(timeout)} if timeout else {}
     if watchdog:
         defines["WATCHDOG"] = str(watchdog)
+    if long_press:
+        defines["LONG_PRESS"] = str(long_press)
     out = iverilog(SOURCES, "tb_serial_system", plusargs=args, defines=defines or None,
                    cwd=cwd).splitlines()
     assert "DONE" in out and "TIMEOUT" not in out, out[-20:]
@@ -140,6 +147,10 @@ def run(cwd, items, tail=REPLY_CYCLES + 2000, image=IMAGE, timeout=None, watchdo
             r.press = int(rest[0])
         elif word == "S2":
             r.s2.append(line)
+        elif word == "CLEAR":
+            r.clears.append(int(rest[0]))
+        elif word == "HEADER":
+            r.headers.append((int(rest[0]), int(rest[1])))
         elif word == "RESULT":
             r.result = {k: int(v) for k, v in re.findall(r"(\w+)=(\d+)", line)}
         elif word == "TXERR":
@@ -178,7 +189,8 @@ def test_status_from_system(tmp_path):
 
 
 def test_s1_keeps_key(tmp_path):
-    r = run(tmp_path, [key(0x41)], PRESS_AT=1000)
+    # the program starts again once RAM and screen are cleared
+    r = run(tmp_path, [key(0x41)], tail=CLEAR_CYCLES + 5600, PRESS_AT=1000)
     assert len(r.resets) == 1 and r.resets[0] >= r.press
     assert [v for _, v in r.kbd] == [0x41]
     after = [v for c, v in r.r1() if c > r.resets[0]]
@@ -269,19 +281,52 @@ def test_pc_quiet_mid_write(tmp_path):
     assert [r.ram[16], r.ram[16383], r.screen[8191]] == [0, 0, 0]
 
 
-def test_s2_mid_write(tmp_path):
-    # S2 goes down while page 0 programs and comes up before page 1.
+@pytest.mark.parametrize("held", [LONG, SHORT], ids=["long", "short"])
+def test_s2_mid_write(tmp_path, held):
+    # S2 goes down while page 0 programs and comes up before page 1: no reload,
+    # no pause, in the session (STATUS after page 0) or after it
     items = start_frames() + page_frames(NEW_IMAGE, 0)
     program_wait = items.pop()
-    items += [("idle", 5), ("s2", 3000), program_wait]
+    items += [("idle", 5), ("s2", held), program_wait] + frame(STATUS_REQ, idle=STATUS_BITS)
     for page in list(pages(NEW_IMAGE))[1:]:
         items += page_frames(NEW_IMAGE, page)
     r = run(tmp_path, items + end_frames(NEW_IMAGE), image=OLD_IMAGE, timeout=SESSION_TIMEOUT)
     assert len(r.s2) == 1 and "session=1 fl_busy=1" in r.s2[0], r.s2
     replies = decode_frames(bytes(r.tx))
-    assert [t for t, _ in replies] == [0x90, 0x91, 0x92, 0x94, 0x94, 0x95, 0x96, 0x83]
-    assert replies[5][1] == b"\x00" + zlib.crc32(NEW_IMAGE).to_bytes(4, "little")
-    assert parse_status(replies[7][1])["boot_state"] == RUN
+    assert [t for t, _ in replies] == [0x90, 0x91, 0x92, 0x94, 0x83, 0x94, 0x95, 0x96, 0x83]
+    assert parse_status(replies[4][1])["paused"] == 0
+    assert replies[6][1] == b"\x00" + zlib.crc32(NEW_IMAGE).to_bytes(4, "little")
+    assert parse_status(replies[8][1])["boot_state"] == RUN
+    assert parse_status(replies[8][1])["paused"] == 0
+    assert last_writes(r)[20] == 4321
+
+
+@pytest.mark.parametrize("held_after", ["long", "short"])
+def test_s2_from_session_does_nothing_after(tmp_path, held_after):
+    # S2 goes down just before END and comes up after it: reaching LONG_PRESS
+    # after END it must not load the next slot; released once the reload runs
+    # it must not pause
+    reload_bits = (CLEAR_CYCLES + 40 * len(NEW_IMAGE) + 5000) // CPB
+    items = start_frames()
+    for page in pages(NEW_IMAGE):
+        items += page_frames(NEW_IMAGE, page)
+    items += frame(CRC, crc_payload(0, len(NEW_IMAGE)), op_bits(len(NEW_IMAGE)))
+    items += [("s2_level", 1)]
+    if held_after == "long":
+        items += frame(END, idle=(LONG + 500) // CPB) + [("s2_level", 0)]
+        items += [("idle", reload_bits + 50000 // CPB)]
+        long_press = None
+    else:
+        items += frame(END, idle=reload_bits) + [("s2_level", 0), ("idle", 1000)]
+        long_press = 10 * CLEAR_CYCLES
+    r = run(tmp_path, items + frame(STATUS_REQ), image=OLD_IMAGE, timeout=SESSION_TIMEOUT,
+            long_press=long_press)
+    assert "session=1" in r.s2[0], r.s2
+    s, _ = statuses(r, [0x90, 0x91, 0x92, 0x94, 0x94, 0x95, 0x96, 0x83])
+    assert (s[-1]["paused"], s[-1]["boot_state"]) == (0, RUN)
+    # power-on, then only the reload of slot 0 at END
+    assert [slot for _, slot in r.headers] == [0, 0], r.headers
+    assert len(r.clears) == 1
     assert last_writes(r)[20] == 4321
 
 
@@ -334,21 +379,24 @@ def test_watchdog_resumes(tmp_path):
     assert len([c for c, _ in r.r1() if r.end - 2000 < c < r.end]) >= 10
 
 
-def test_s1_while_paused_stays_paused(tmp_path):
-    items = [key(0x41)] + debug(OP_PAUSE) + [("s1", 1)] + frame(STATUS_REQ, idle=STATUS_BITS)
-    items += [("s1", 0)] + frame(STATUS_REQ)
+def test_s1_while_paused_resumes_cleared(tmp_path):
+    # S1 is a power-on: RAM and screen cleared, running at full speed
+    items = [key(0x41)] + debug(OP_PAUSE) + debug(OP_SPEED, gap=5000) + [("s1", 1)]
+    items += frame(STATUS_REQ, idle=STATUS_BITS) + [("s1", 0), ("idle", CLEAR_CYCLES // CPB)]
+    items += frame(STATUS_REQ)
     r = run(tmp_path, items)
-    s, _ = statuses(r, [0x84, 0x83, 0x83])
-    assert s[1]["boot_state"] == RESET
-    assert (s[2]["paused"], s[2]["next_pc"], s[2]["boot_state"]) == (1, 0, PAUSE)
-    assert trace(tmp_path)[-1] == "reset"
+    s, _ = statuses(r, [0x84, 0x84, 0x83, 0x83])
+    assert s[2]["boot_state"] == RESET
+    assert (s[3]["paused"], s[3]["gap"], s[3]["boot_state"]) == (0, 0, RUN)
+    assert r.clears and r.clears[-1] > r.resets[-1]
+    assert [v for c, v in r.r1() if c > r.clears[-1]][:1] == [0x41]
 
 
 def test_s2_and_session_end_resume(tmp_path):
     reload_bits = (CLEAR_CYCLES + 40 * len(IMAGE) + 5000) // CPB
     paused = [key(0x41)] + debug(OP_PAUSE) + debug(OP_SPEED, gap=5000)
     ends = {
-        "s2": [("s2", 3000), ("idle", reload_bits)],
+        "s2": [("s2", LONG), ("idle", reload_bits)],
         "end": frame(HELLO, idle=100) + frame(BEGIN, idle=100) + frame(END, idle=reload_bits),
     }
     types = {"s2": [0x84, 0x84, 0x83], "end": [0x84, 0x84, 0x90, 0x91, 0x96, 0x83]}
@@ -358,6 +406,28 @@ def test_s2_and_session_end_resume(tmp_path):
         s, _ = statuses(r, types[name])
         assert (s[-1]["paused"], s[-1]["gap"], s[-1]["boot_state"]) == (0, 0, RUN), name
         assert len([c for c, _ in r.r1() if r.end - 2000 < c < r.end]) >= 10, name
+
+
+
+def test_s2_toggles_shared_pause(tmp_path):
+    # S2 and HackLink flip the same pause
+    press = [("s2", SHORT), ("idle", 10)]
+    items = [key(0x41)] + press + frame(STATUS_REQ, idle=STATUS_BITS)
+    items += debug(OP_RUN) + debug(OP_PAUSE) + press + frame(STATUS_REQ, idle=STATUS_BITS)
+    r = run(tmp_path, items)
+    s, _ = statuses(r, [0x83, 0x84, 0x84, 0x83])
+    assert [(x["paused"], x["boot_state"]) for x in s] == [
+        (1, PAUSE), (0, RUN), (1, PAUSE), (0, RUN)]
+    assert r.resets == [] and r.clears == []
+    assert len([c for c, _ in r.r1() if r.end - 2000 < c < r.end]) >= 10
+
+
+def test_s2_pauses_with_link_lost(tmp_path):
+    # no PC talking: link_lost stays high, S2 still pauses
+    items = [key(0x41), ("idle", WATCHDOG // CPB + 100), ("s2", SHORT), ("idle", 1000)]
+    r = run(tmp_path, items + frame(STATUS_REQ))
+    s, _ = statuses(r, [0x83])
+    assert (s[0]["paused"], s[0]["boot_state"]) == (1, PAUSE)
 
 
 def test_slow_run_over_serial(tmp_path):
@@ -370,11 +440,39 @@ def test_slow_run_over_serial(tmp_path):
     assert abs(r.result["executed"] - r.end_executed - tail // 2000) <= 1
 
 
+@pytest.mark.parametrize("gap", [1, 2])
+def test_read_at_small_gap_over_serial(tmp_path, gap):
+    # a buffered fetch takes 2 cycles, so at these gaps the CPU never idles by itself
+    items = [key(0x41)] + debug(OP_SPEED, gap=gap)
+    items += frame(READ_RAM, read_payload(1, 1), READ_BITS)
+    items += frame(READ_ROM, read_payload(0, len(ROM)), READ_BITS) + frame(STATUS_REQ)
+    r = run(tmp_path, items)
+    s, replies = statuses(r, [0x84, 0x85, 0x86, 0x83])
+    assert (s[1]["paused"], s[1]["gap"], s[1]["boot_state"]) == (0, gap, RUN)
+    assert parse_read(replies[1][1]) == (1, [0x41])
+    assert parse_read(replies[2][1]) == (0, ROM)
+
+
 def test_reset_over_serial(tmp_path):
     # RESET while paused: the CPU resets, pc 0, still paused, nothing runs after
     items = [key(0x41)] + debug(OP_PAUSE) + debug(OP_STEP, 1) + debug(OP_RESET)
-    r = run(tmp_path, items + frame(STATUS_REQ))
+    r = run(tmp_path, items + [("idle", CLEAR_CYCLES // CPB)] + frame(STATUS_REQ))
     s, _ = statuses(r, [0x84] * 3 + [0x83])
-    for st in s[2:]:
-        assert (st["paused"], st["next_pc"], st["boot_state"]) == (1, 0, PAUSE)
+    # RESET's reply goes out while RAM and screen are still being cleared
+    assert (s[2]["paused"], s[2]["next_pc"], s[2]["boot_state"]) == (1, 0, RESET)
+    assert (s[3]["paused"], s[3]["next_pc"], s[3]["boot_state"]) == (1, 0, PAUSE)
     assert trace(tmp_path)[-1] == "reset"
+    # the program wrote the key to RAM[1] before RESET
+    assert r.ram == [0] * 16384 and r.screen == [0] * 8192
+
+
+def test_reset_while_running_over_serial(tmp_path):
+    # RESET at a slowed speed: RAM and screen cleared, then the program runs again
+    # from PC 0 at the same speed
+    items = [key(0x41)] + debug(OP_SPEED, gap=2000) + debug(OP_RESET)
+    items += [("idle", CLEAR_CYCLES // CPB)] + frame(STATUS_REQ)
+    r = run(tmp_path, items, watchdog=10**6)
+    s, _ = statuses(r, [0x84, 0x84, 0x83])
+    assert (s[2]["paused"], s[2]["gap"], s[2]["boot_state"]) == (0, 2000, RUN)
+    assert len(r.resets) == 1 and r.clears and r.clears[-1] >= r.resets[0]
+    assert [v for c, v in r.r1() if c > r.clears[-1]][:1] == [0x41]

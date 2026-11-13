@@ -22,6 +22,7 @@ module tb_debug_system;
     wire busy, running, err_header, err_crc;
     wire [2:0] boot_state;
     wire [127:0] prog_name;
+    wire [4:0] slot;
     wire [15:0] prog_words, dbg_instr, dbg_a, dbg_d, sp, sp_max;
     wire [14:0] dbg_pc, heap_hi;
 
@@ -34,7 +35,7 @@ module tb_debug_system;
         .rsp_valid(rsp_valid), .rsp_word(rsp_word), .rsp_rdata(rsp_rdata), .init_done(init_done),
         .vclk(vclk), .vaddr(13'd0), .vdata(vdata),
         .busy(busy), .running(running), .err_header(err_header), .err_crc(err_crc),
-        .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words),
+        .boot_state(boot_state), .prog_name(prog_name), .prog_words(prog_words), .slot(slot),
         .dbg_pc(dbg_pc), .dbg_instr(dbg_instr), .dbg_a(dbg_a), .dbg_d(dbg_d),
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi),
         // no flash requests here
@@ -66,7 +67,7 @@ module tb_debug_system;
     debug_screen screen (
         .clk(clk), .rst(por), .frame_start(frame_start), .frame_ready(frame_ready),
         .pix_req(pix_req), .pix_x(pix_x), .pix_y(pix_y), .pixel(pixel),
-        .boot_state(boot_state), .slot(5'd0), .prog_name(prog_name),
+        .boot_state(boot_state), .slot(slot), .prog_name(prog_name),
         .prog_words(prog_words), .pc(dbg_pc), .instr(dbg_instr), .a(dbg_a), .d(dbg_d),
         .sp(sp), .sp_max(sp_max), .heap_hi(heap_hi)
     );

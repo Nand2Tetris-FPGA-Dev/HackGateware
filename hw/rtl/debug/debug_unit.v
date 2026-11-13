@@ -18,14 +18,20 @@
 // go_run forces run at full speed and keeps step_seq. A PAUSE still waiting
 // then gets its done.
 //
+// toggle (the S2 button) flips paused as RUN or PAUSE would, with no done.
+// It is dropped while a command is in progress or arrives with it.
+//
 // Reads: one word at a time through hack_computer's debug ports, RAM words in
-// idle cycles, ROM words between CPU fetches. Refused at full speed. If full
-// speed comes back mid-read, a ROM word already asked for is waited out, then
-// the read ends refused.
+// idle cycles, ROM words between CPU fetches. A word that finds no idle cycle
+// holds off the next paced fetch for one, or a gap no longer than an
+// instruction would never leave one. Refused at full speed. If full speed comes
+// back mid-read, a ROM word already asked for is waited out, then the read ends
+// refused.
 module debug_unit (
     input  wire        clk,
     input  wire        rst,
     input  wire        go_run,       // level: run at gap 0
+    input  wire        toggle,       // 1 cycle
     input  wire        cmd,          // 1 cycle
     input  wire [2:0]  cmd_op,       // 0 RUN 1 PAUSE 2 STEP 3 RESET 4 SPEED
     input  wire [7:0]  cmd_seq,
@@ -65,6 +71,8 @@ module debug_unit (
     reg stepping = 1'b0;
     reg step_go = 1'b0;    // lets one fetch through while paused
     reg [24:0] since = SINCE_MAX;
+    reg paced = 1'b1;      // since >= gap
+    wire rd_want;          // a read word waits for an idle cycle
 
     initial begin
         cmd_done = 1'b0;
@@ -74,16 +82,30 @@ module debug_unit (
     end
 
     assign reset_cpu = cmd & (cmd_op == OP_RESET);
-    assign fetch_en = (~paused & (since >= gap)) | step_go;
+    assign fetch_en = (~paused & paced) | step_go;
+
+    // paced is worked out a cycle ahead from the next since and gap, so no
+    // 25-bit compare sits on fetch_en (the clk27 critical path). fetch_start
+    // only picks among compares made in parallel.
+    wire [24:0] gap_m1 = gap - 1'b1;
+    wire [24:0] since_inc = (since == SINCE_MAX) ? since : since + 1'b1;
+    wire [24:0] next_gap = (rst | go_run) ? 25'd0
+                         : (cmd & (cmd_op > OP_RESET)) ? cmd_gap : gap;
+    // Holds the next fetch back a cycle so a waiting read word gets an idle one
+    wire hold = rd_want & ~idle & (since >= gap_m1);
 
     always @(posedge clk) begin
         cmd_done <= 1'b0;
         if (fetch_start) begin
             since <= 25'd1;
             step_go <= 1'b0;
-        end else if (since != SINCE_MAX) begin
-            since <= since + 1'b1;
+        end else if (hold) begin
+            since <= gap_m1;
+        end else begin
+            since <= since_inc;
         end
+        paced <= rst | (fetch_start ? next_gap <= 25'd1
+                        : hold ? gap_m1 >= next_gap : since_inc >= next_gap);
         if (wait_idle & (idle | cpu_hold | go_run)) begin
             wait_idle <= 1'b0;
             cmd_done <= 1'b1;
@@ -121,6 +143,8 @@ module debug_unit (
                     cmd_done <= 1'b1;
                 end
             endcase
+        end else if (toggle & ~wait_idle & ~stepping) begin
+            paused <= ~paused;
         end
         // A step_go still set is used by the next fetch, which now starts anyway
         if (go_run) begin
@@ -156,6 +180,7 @@ module debug_unit (
     assign dbg_preq = reading & rom & (p_out | ((left != 7'd0) & ~full));
     assign dbg_maddr = addr;
     assign dbg_paddr = addr;
+    assign rd_want = dbg_mreq | (dbg_preq & ~p_out);
 
     always @(posedge clk) begin
         rd_word_valid <= 1'b0;

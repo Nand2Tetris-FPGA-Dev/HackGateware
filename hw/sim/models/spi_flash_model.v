@@ -8,6 +8,7 @@
 // clear it when done, and hold WIP for +ERASE_US / +PROG_US. Without WEL the
 // command prints "IGNORED xx"; anything but RDSR while WIP prints "BUSY xx".
 // Contents come from HEXFILE, one byte per line; addresses wrap at SIZE.
+// CS# high for less than tSHSL (30 ns, Table 5-3) prints an ERROR.
 // +DUMP=addr,len (hex) prints that range at the end of the run.
 module spi_flash_model #(
     parameter HEXFILE = "",
@@ -29,6 +30,7 @@ module spi_flash_model #(
     integer dump_addr, dump_len, r;
     reg [8*40:1] dump_arg;
     event wip_start;
+    realtime cs_rise = -1.0e9;
 
     initial begin
         for (i = 0; i < SIZE; i = i + 1) mem[i] = 8'hff;
@@ -44,6 +46,8 @@ module spi_flash_model #(
     end
 
     always @(negedge cs_n) begin
+        if ($realtime - cs_rise < 30.0)
+            $display("ERROR flash model: CS# high %0.1f ns, tSHSL 30 ns", $realtime - cs_rise);
         nbits = 0;
         bitpos = 0;
         page_set = 0;
@@ -94,6 +98,7 @@ module spi_flash_model #(
 
     // Writes start when CS# goes high, and only on a byte boundary
     always @(posedge cs_n) begin
+        cs_rise = $realtime;
         miso = 1'bz;
         if (nbits > 0 && !busy_cmd && (op == 8'h06 || op == 8'h20 || op == 8'hd8
                                         || op == 8'h02)) begin
