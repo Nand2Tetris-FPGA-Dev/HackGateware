@@ -16,14 +16,14 @@
 // waiting there must get its fetch_ready.
 //
 // fl_* and pb_* carry the serial link's flash requests to flash_session. A
-// session holds the loader and CPU (s1 and s2 do nothing more until it ends);
-// when it ends, RAM and screen are cleared while the loader reloads slot 0
-// (prog flash waits for slot 0 to run).
+// session holds the loader and CPU (s1 does nothing more until it ends; an s2
+// press under way in it is dropped); when it ends, RAM and screen are cleared
+// while the loader reloads slot 0 (prog flash waits for slot 0 to run).
 //
 // debug_unit takes the serial link's DEBUG and READ requests. Power-on, s1, a
-// long s2, the end of a flash session and a lost link put it back to full-speed
-// run. Its RESET pulse resets the CPU and clears RAM and screen as s1 does, but
-// keeps the run state and speed.
+// long s2, the end of a flash session and the link going quiet put it back to
+// full-speed run. Its RESET pulse resets the CPU and clears RAM and screen as
+// s1 does, but keeps the run state and speed.
 module flash_boot_system #(
     parameter SESSION_TIMEOUT_CYCLES = 27_000_000,
     parameter LONG_PRESS_CYCLES = 27_000_000
@@ -103,9 +103,11 @@ module flash_boot_system #(
 
     wire s2_short, s2_long;
     press_timer #(.LONG_CYCLES(LONG_PRESS_CYCLES)) s2_timer (
-        .clk(clk), .btn(s2), .short_press(s2_short), .long_press(s2_long)
+        .clk(clk), .btn(s2), .cancel(session), .short_press(s2_short),
+        .long_press(s2_long)
     );
-    // only a running program pauses; nothing during a session
+    // only a running program pauses; a press during a session does nothing,
+    // even once the session ends
     wire toggle = s2_short & running;
     wire next = s2_long & ~session;
 
@@ -226,8 +228,14 @@ module flash_boot_system #(
     wire [14:0] dbg_maddr, dbg_paddr;
     wire [15:0] dbg_mdata, dbg_pdata;
 
+    // link_lost stays high while no PC talks; only its rise resumes, so s2
+    // can still pause a program run without a PC
+    reg lost_q = 1'b0;
+    always @(posedge clk) lost_q <= link_lost;
+
     debug_unit debug (
-        .clk(clk), .rst(~por_n), .go_run(~por_n | s1 | next | session_end | link_lost),
+        .clk(clk), .rst(~por_n),
+        .go_run(~por_n | s1 | next | session_end | link_lost & ~lost_q),
         .toggle(toggle),
         .cmd(dbg_cmd), .cmd_op(dbg_op), .cmd_seq(dbg_seq), .cmd_gap(dbg_gap),
         .cmd_done(cmd_done),

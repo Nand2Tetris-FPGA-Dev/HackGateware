@@ -238,7 +238,9 @@ def test_s2_short_ignored_when_no_program(tmp_path, case):
 
 
 def test_s2_short_ignored_while_s1_held(tmp_path):
-    # S1 and S2 down, S2 up (a short press) while S1 still holds the CPU, S1 up
+    # S1 and S2 down, S2 up (a short press) while S1 still holds the CPU, S1 up.
+    # S1 also forces run, so this checks the outcome, not the toggle's gate
+    # (test_s2_short_ignored_when_no_program does)
     rom = long_loop()
     run = run_boot(tmp_path, build_image(rom, "loop"), 800, press=(S1_S2, 500, EXEC, 0, 100))
     r = run.result
