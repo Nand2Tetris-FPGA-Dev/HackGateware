@@ -116,6 +116,13 @@ def carried(machine, rom):
     return m
 
 
+def cleared(machine, rom):
+    """rom started from PC 0 on cleared RAM and screen; A and D are kept."""
+    m = HackMachine(rom)
+    m.a, m.d = machine.a, machine.d
+    return m
+
+
 def test_boots_and_draws(tmp_path):
     rom = program("screen_pattern")
     run = run_boot(tmp_path, build_image(rom, "pattern"), 400_000)
@@ -193,8 +200,18 @@ def test_s1_restarts_without_reload(tmp_path, at, wait_for, delay):
     assert len(run.segments) == 2
     m = HackMachine(rom)
     assert_runs(run.segments[0], rom, m)
-    m.reset()
-    assert_runs(run.segments[1], rom, m)
+    assert_runs(run.segments[1], rom, cleared(m, rom))
+
+
+def test_s1_clears_ram_and_screen(tmp_path):
+    # COPY_ROM copies what the last run left; after S1 it must find zeros
+    rom = assemble(COPY_ROM)
+    run = run_boot(tmp_path, build_image(rom, "copy"), 60, press=(S1, 30, EXEC, 0, 3))
+    assert run.result["loads"] == loads_for(rom)
+    assert len(run.segments) == 2 and run.segments[1][0][0] == 0
+    assert len(run.segments[1]) > 22  # the whole program ran again
+    assert run.ram[16:20] == [1234, 0, 0, 0]
+    assert run.ram[16383] == run.screen[8191] == 0xFFFF
 
 
 def test_boots_on_psram_ctrl(tmp_path):

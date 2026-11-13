@@ -91,6 +91,7 @@ class Run:
     ram: list[int] = field(default_factory=list)
     screen: list[int] = field(default_factory=list)
     s2: list[str] = field(default_factory=list)                         # S2 press lines
+    clears: list[int] = field(default_factory=list)                     # cycle clearing starts
 
     def r1(self):
         return [(c, v) for c, a, v in self.writes if a == 1]
@@ -140,6 +141,8 @@ def run(cwd, items, tail=REPLY_CYCLES + 2000, image=IMAGE, timeout=None, watchdo
             r.press = int(rest[0])
         elif word == "S2":
             r.s2.append(line)
+        elif word == "CLEAR":
+            r.clears.append(int(rest[0]))
         elif word == "RESULT":
             r.result = {k: int(v) for k, v in re.findall(r"(\w+)=(\d+)", line)}
         elif word == "TXERR":
@@ -178,7 +181,8 @@ def test_status_from_system(tmp_path):
 
 
 def test_s1_keeps_key(tmp_path):
-    r = run(tmp_path, [key(0x41)], PRESS_AT=1000)
+    # the program starts again once RAM and screen are cleared
+    r = run(tmp_path, [key(0x41)], tail=CLEAR_CYCLES + 5600, PRESS_AT=1000)
     assert len(r.resets) == 1 and r.resets[0] >= r.press
     assert [v for _, v in r.kbd] == [0x41]
     after = [v for c, v in r.r1() if c > r.resets[0]]
@@ -334,14 +338,17 @@ def test_watchdog_resumes(tmp_path):
     assert len([c for c, _ in r.r1() if r.end - 2000 < c < r.end]) >= 10
 
 
-def test_s1_while_paused_stays_paused(tmp_path):
-    items = [key(0x41)] + debug(OP_PAUSE) + [("s1", 1)] + frame(STATUS_REQ, idle=STATUS_BITS)
-    items += [("s1", 0)] + frame(STATUS_REQ)
+def test_s1_while_paused_resumes_cleared(tmp_path):
+    # S1 is a power-on: RAM and screen cleared, running at full speed
+    items = [key(0x41)] + debug(OP_PAUSE) + debug(OP_SPEED, gap=5000) + [("s1", 1)]
+    items += frame(STATUS_REQ, idle=STATUS_BITS) + [("s1", 0), ("idle", CLEAR_CYCLES // CPB)]
+    items += frame(STATUS_REQ)
     r = run(tmp_path, items)
-    s, _ = statuses(r, [0x84, 0x83, 0x83])
-    assert s[1]["boot_state"] == RESET
-    assert (s[2]["paused"], s[2]["next_pc"], s[2]["boot_state"]) == (1, 0, PAUSE)
-    assert trace(tmp_path)[-1] == "reset"
+    s, _ = statuses(r, [0x84, 0x84, 0x83, 0x83])
+    assert s[2]["boot_state"] == RESET
+    assert (s[3]["paused"], s[3]["gap"], s[3]["boot_state"]) == (0, 0, RUN)
+    assert r.clears and r.clears[-1] > r.resets[-1]
+    assert [v for c, v in r.r1() if c > r.clears[-1]][:1] == [0x41]
 
 
 def test_s2_and_session_end_resume(tmp_path):
@@ -386,8 +393,23 @@ def test_read_at_small_gap_over_serial(tmp_path, gap):
 def test_reset_over_serial(tmp_path):
     # RESET while paused: the CPU resets, pc 0, still paused, nothing runs after
     items = [key(0x41)] + debug(OP_PAUSE) + debug(OP_STEP, 1) + debug(OP_RESET)
-    r = run(tmp_path, items + frame(STATUS_REQ))
+    r = run(tmp_path, items + [("idle", CLEAR_CYCLES // CPB)] + frame(STATUS_REQ))
     s, _ = statuses(r, [0x84] * 3 + [0x83])
-    for st in s[2:]:
-        assert (st["paused"], st["next_pc"], st["boot_state"]) == (1, 0, PAUSE)
+    # RESET's reply goes out while RAM and screen are still being cleared
+    assert (s[2]["paused"], s[2]["next_pc"], s[2]["boot_state"]) == (1, 0, RESET)
+    assert (s[3]["paused"], s[3]["next_pc"], s[3]["boot_state"]) == (1, 0, PAUSE)
     assert trace(tmp_path)[-1] == "reset"
+    # the program wrote the key to RAM[1] before RESET
+    assert r.ram == [0] * 16384 and r.screen == [0] * 8192
+
+
+def test_reset_while_running_over_serial(tmp_path):
+    # RESET at a slowed speed: RAM and screen cleared, then the program runs again
+    # from PC 0 at the same speed
+    items = [key(0x41)] + debug(OP_SPEED, gap=2000) + debug(OP_RESET)
+    items += [("idle", CLEAR_CYCLES // CPB)] + frame(STATUS_REQ)
+    r = run(tmp_path, items, watchdog=10**6)
+    s, _ = statuses(r, [0x84, 0x84, 0x83])
+    assert (s[2]["paused"], s[2]["gap"], s[2]["boot_state"]) == (0, 2000, RUN)
+    assert len(r.resets) == 1 and r.clears and r.clears[-1] >= r.resets[0]
+    assert [v for c, v in r.r1() if c > r.clears[-1]][:1] == [0x41]

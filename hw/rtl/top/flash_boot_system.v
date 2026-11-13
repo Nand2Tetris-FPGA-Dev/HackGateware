@@ -4,8 +4,9 @@
 // The board top adds psram_ctrl, clocks, video and pins.
 //
 // Once PSRAM is ready the loader copies the image, and the CPU stays in reset
-// until the image checks out. s1 resets the CPU alone; the program in PSRAM
-// and RAM are kept. s2 resets the loader, which drops done and so the CPU,
+// until the image checks out. s1 resets the CPU and clears RAM and screen, so
+// a restart is a power-on (Jack programs may count on static variables
+// starting at 0); the program in PSRAM is kept. s2 resets the loader, which drops done and so the CPU,
 // and the loader starts again when s2 goes low. progmem_psram is reset by
 // por_n only: a fetch waiting there must get its fetch_ready.
 //
@@ -13,9 +14,10 @@
 // session holds the loader and CPU (s1 and s2 do nothing more until it ends);
 // when it ends, RAM and screen are cleared while the loader reloads slot 0.
 //
-// debug_unit takes the serial link's DEBUG and READ requests. Power-on, s2,
-// the end of a flash session and a lost link put it back to full-speed run.
-// Its RESET pulse resets the CPU as s1 does.
+// debug_unit takes the serial link's DEBUG and READ requests. Power-on, s1,
+// s2, the end of a flash session and a lost link put it back to full-speed
+// run. Its RESET pulse resets the CPU and clears RAM and screen as s1 does, but
+// keeps the run state and speed.
 module flash_boot_system #(
     parameter SESSION_TIMEOUT_CYCLES = 27_000_000
 ) (
@@ -188,7 +190,7 @@ module flash_boot_system #(
     wire [15:0] dbg_mdata, dbg_pdata;
 
     debug_unit debug (
-        .clk(clk), .rst(~por_n), .go_run(~por_n | s2 | session_end | link_lost),
+        .clk(clk), .rst(~por_n), .go_run(~por_n | s1 | s2 | session_end | link_lost),
         .cmd(dbg_cmd), .cmd_op(dbg_op), .cmd_seq(dbg_seq), .cmd_gap(dbg_gap),
         .cmd_done(cmd_done),
         .rd(rd), .rd_rom(rd_rom), .rd_addr(rd_addr), .rd_count(rd_count),
@@ -203,7 +205,7 @@ module flash_boot_system #(
     );
 
     hack_computer computer (
-        .clk(clk), .reset(cpu_reset), .clear(session_end), .clearing(clearing),
+        .clk(clk), .reset(cpu_reset), .clear(session_end | s1 | reset_cpu), .clearing(clearing),
         .pm_req(pm_req), .pm_addr(pm_addr), .pm_ready(pm_ready), .pm_data(pm_data),
         .keyboard(keyboard), .vclk(vclk), .vaddr(vaddr), .vdata(vdata),
         .dbg_pc(dbg_pc), .dbg_a(dbg_a), .dbg_d(dbg_d), .dbg_instr(dbg_instr), .dbg_exec(exec),

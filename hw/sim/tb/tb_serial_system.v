@@ -7,7 +7,8 @@
 // "<idle_bits> s1 <0|1>" to set S1); prints SENT per byte and END after the
 // last. +PRESS_AT=n holds S1 for 3 cycles from n cycles after END.
 // Prints W per CPU RAM write, KBD on each keyboard change and TX per reply
-// byte, all with the cycle count, and "reset" when the CPU goes into reset.
+// byte, all with the cycle count, "reset" when the CPU goes into reset and
+// CLEAR when RAM and screen clearing starts.
 // trace.txt gets "pc instr a d" per instruction. +TAIL: cycles to run after
 // END; +STEPS=n stops after n instructions instead. At the end: ram.txt,
 // screen.txt and a RESULT line. END and RESULT carry the instruction count.
@@ -110,7 +111,7 @@ module tb_serial_system;
     always #20 vclk = ~vclk;
 
     integer cycle = 0, executed = 0, steps, trace_fd;
-    reg was_reset = 1;
+    reg was_reset = 1, was_clearing = 0;
     reg [14:0] pc_before;
     reg [15:0] instr;
     reg [15:0] kbd_seen = 0;
@@ -125,6 +126,8 @@ module tb_serial_system;
             $fdisplay(trace_fd, "reset");
         end
         was_reset = dut.cpu_reset;
+        if (dut.clearing && !was_clearing) $display("CLEAR %0d", cycle);
+        was_clearing = dut.clearing;
         if (dut.computer.dbg_exec) begin
             pc_before = dbg_pc;
             instr = dbg_instr;
