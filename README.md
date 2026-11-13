@@ -58,9 +58,11 @@ hacktools prog flash sw/tests/screen_pattern.asm --slot 0
 ```
 
 The board loads slot 0 at power-on. S1 restarts the program on cleared RAM
-and screen. A short S2 press pauses or resumes it (the same pause as
-HackLink's). Holding S2 for 1 s loads the next slot that holds a program,
-skipping empty ones and wrapping after slot 31. LEDs: 0 loading, 1 running,
+and screen, and ends a HackLink pause or slow speed. A short S2 press pauses
+or resumes it (the same pause as HackLink's). Holding S2 for 1 s loads the
+next slot that holds a program, skipping empty ones and wrapping after slot
+31. A slot with a bad CRC stops there on BADCRC; hold S2 again to move on.
+The buttons do nothing while `prog flash` writes. LEDs: 0 loading, 1 running,
 2 no valid program in the slot, 3 CRC error, 4 PSRAM ready, 5 heartbeat.
 
 Once the `hdmi` build runs, `prog flash` writes over the serial link: it finds

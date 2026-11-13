@@ -1,6 +1,6 @@
 `default_nettype none
 
-// Hack computer with its program loaded from flash slot 0 into PSRAM, Hack
+// Hack computer with its program loaded from a flash slot into PSRAM, Hack
 // screen on HDMI, status text on the 1.14" LCD. S1 restarts the program, a
 // short S2 press pauses or resumes it, and holding S2 for 1 s loads the next
 // slot with a program.
