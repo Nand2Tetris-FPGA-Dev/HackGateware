@@ -2,7 +2,9 @@
 // MOSI changes while SCK is low, both sides sample on the rising edge.
 // SCK = clk / (2 * HALF_PERIOD); 27 MHz / 4 = 6.75 MHz, well under READ's limit.
 // A start pulse sends the command and addr, then bytes stream out on
-// out_valid/out_ready. SCK pauses while a byte waits. stop raises CS.
+// out_valid/out_ready. SCK pauses while a byte waits. stop raises CS. A start
+// right after stop or reset leaves CS# high one clk, 37 ns at 27 MHz, above
+// tSHSL (30 ns, datasheet Ver1.3 Table 5-3); spi_flash_model checks it.
 // The board's flash is a PUYA P25Q32H (as reported by openFPGALoader); READ is
 // in its datasheet, section 10.10 Read Data Bytes. Checked on the board.
 module spi_flash_reader #(
